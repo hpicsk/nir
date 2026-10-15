@@ -1,0 +1,42 @@
+# Bulk data: extracted AI Hub 526 labels/images + built training sets.
+# Regenerable from the raw zips via the README. The splits, the index
+# and the geometry probe under data/processed/ are released artifacts
+# and are tracked.
+data/*
+!data/processed/
+
+# The dataset's own manual and construction guideline, extracted to text.
+# They are AI Hub's documents, and the availability statement releases the
+# protocol, the code, the splits and the per-frame accuracies - not these.
+docs/
+
+# Model checkpoints (metrics.json / perframe.npz ARE tracked - they are
+# the Data corner of the Narrative-Data-Code triangle).
+results/preliminary_runs/*/model.pt
+results/runs/*/model.pt
+
+# Run/queue logs
+*.log
+
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# LaTeX build artifacts (regenerable from paper/main.tex via latexmk).
+# main.tex, params.tex, references.bib ARE tracked.
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.out
+paper/*.toc
+paper/*.fdb_latexmk
+paper/*.fls
+paper/*.spl
+paper/*.synctex.gz
+paper/main.pdf
+paper/main.log
+
+# Working instruments: audit reports, fact-check reports, reading ledgers and
+# the full texts a fact-check reads. They record a check and its verdict, and
+# the findings live in the sentences and commits that acted on them.
+_internal/

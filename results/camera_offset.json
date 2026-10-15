@@ -1,0 +1,13 @@
+{
+  "n_frames": 1200,
+  "search_half_width_px": 24,
+  "median_dy": 7.0,
+  "median_dx": 6.0,
+  "median_peak": 0.010730935726314783,
+  "cross_pair": {
+    "n_pairs": 1200,
+    "median_dy": 1.0,
+    "median_dx": 0.0,
+    "median_peak": 0.0052194418385624886
+  }
+}

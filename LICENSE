@@ -1,0 +1,57 @@
+Scope
+=====
+
+The MIT license below covers the source code in this repository: everything
+under `src/`, and the root-level `run_full_pipeline.py`, `test_assertions.py`
+and `requirements.txt`.
+
+It does not cover the following, and nothing in it should be read as granting
+rights over them.
+
+`data/` and `results/`
+    The split, site and frame index files, the per-run metrics and per-frame
+    accuracies, and the result tables derive from the AI Hub Precision
+    Agriculture Farm Machinery Autonomous Driving dataset
+    (https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=526). The AI Hub
+    usage policy (https://www.aihub.or.kr/intrcn/guid/usagepolicy.do) states
+    that the data AI Hub provides were constructed as part of the Intelligent
+    Information Industry Infrastructure Development project of the Korean
+    Ministry of Science and ICT and the National Information Society Agency
+    (NIA). Their use is governed by that policy, not by this license. They are
+    published here so that the results reported in the accompanying paper can
+    be checked, and any reuse states that the data are a result of NIA's
+    project, as that policy requires of derivative works.
+
+`paper/ieeeconf.cls`
+    The IEEE conference class, a revision of IEEEtran.cls. Its header names its
+    copyright holders and states that it is distributed under the Perl
+    Artistic License.
+
+The rest of `paper/`, and the README
+    The manuscript, its bibliography, its generated tables and figure, and the
+    README.
+    Copyright (c) 2026 Anonymous Authors. All rights reserved.
+
+
+MIT License
+===========
+
+Copyright (c) 2026 Anonymous Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

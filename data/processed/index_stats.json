@@ -1,0 +1,263 @@
+{
+ "n_frames": 15790,
+ "n_dropped_unreadable": 0,
+ "frame_stride": 5,
+ "protocols": {
+  "official": {
+   "train": {
+    "n_frames": 12684,
+    "n_paddy": 8299,
+    "n_field": 4385,
+    "classes": {
+     "common_road": {
+      "frames_rgb": 9647,
+      "frames_nir": 9606,
+      "frames_union": 9703,
+      "px_share_rgb": 0.055062634273494164,
+      "px_share_nir": 0.0718099438399118
+     },
+     "common_tree": {
+      "frames_rgb": 5962,
+      "frames_nir": 5881,
+      "frames_union": 6208,
+      "px_share_rgb": 0.07906325430713815,
+      "px_share_nir": 0.07789227950596629
+     },
+     "field_furrow": {
+      "frames_rgb": 604,
+      "frames_nir": 587,
+      "frames_union": 733,
+      "px_share_rgb": 0.0005628005936439145,
+      "px_share_nir": 0.0005663348137958274
+     },
+     "field_levee": {
+      "frames_rgb": 1098,
+      "frames_nir": 1003,
+      "frames_union": 1224,
+      "px_share_rgb": 0.003113498650356942,
+      "px_share_nir": 0.0033943751772922194
+     },
+     "paddy_before_driving": {
+      "frames_rgb": 2004,
+      "frames_nir": 1882,
+      "frames_union": 2211,
+      "px_share_rgb": 0.005099906550817071,
+      "px_share_nir": 0.005358088043267804
+     },
+     "paddy_after_driving": {
+      "frames_rgb": 5940,
+      "frames_nir": 5969,
+      "frames_union": 6115,
+      "px_share_rgb": 0.05994558233924088,
+      "px_share_nir": 0.0711281171245057
+     },
+     "paddy_edge": {
+      "frames_rgb": 3346,
+      "frames_nir": 3468,
+      "frames_union": 3612,
+      "px_share_rgb": 0.01282638117764352,
+      "px_share_nir": 0.013108649442461864
+     },
+     "paddy_rice": {
+      "frames_rgb": 2909,
+      "frames_nir": 2798,
+      "frames_union": 3130,
+      "px_share_rgb": 0.018639793501906834,
+      "px_share_nir": 0.019756458521253423
+     }
+    }
+   },
+   "val": {
+    "n_frames": 3106,
+    "n_paddy": 2397,
+    "n_field": 709,
+    "classes": {
+     "common_road": {
+      "frames_rgb": 2354,
+      "frames_nir": 2345,
+      "frames_union": 2385,
+      "px_share_rgb": 0.05751972667840075,
+      "px_share_nir": 0.07800270559215718
+     },
+     "common_tree": {
+      "frames_rgb": 248,
+      "frames_nir": 255,
+      "frames_union": 259,
+      "px_share_rgb": 0.0050129431551677334,
+      "px_share_nir": 0.0049093118513503274
+     },
+     "field_furrow": {
+      "frames_rgb": 815,
+      "frames_nir": 804,
+      "frames_union": 997,
+      "px_share_rgb": 0.0022075283902598386,
+      "px_share_nir": 0.0024941873305383004
+     },
+     "field_levee": {
+      "frames_rgb": 1403,
+      "frames_nir": 1412,
+      "frames_union": 1493,
+      "px_share_rgb": 0.01315196085829293,
+      "px_share_nir": 0.01473171465845675
+     },
+     "paddy_before_driving": {
+      "frames_rgb": 819,
+      "frames_nir": 780,
+      "frames_union": 1013,
+      "px_share_rgb": 0.010120396594628676,
+      "px_share_nir": 0.010625573462140008
+     },
+     "paddy_after_driving": {
+      "frames_rgb": 2084,
+      "frames_nir": 2083,
+      "frames_union": 2211,
+      "px_share_rgb": 0.09371752251236538,
+      "px_share_nir": 0.11470529483475216
+     },
+     "paddy_edge": {
+      "frames_rgb": 625,
+      "frames_nir": 723,
+      "frames_union": 770,
+      "px_share_rgb": 0.006426394167716185,
+      "px_share_nir": 0.006220484146552214
+     },
+     "paddy_rice": {
+      "frames_rgb": 935,
+      "frames_nir": 890,
+      "frames_union": 1001,
+      "px_share_rgb": 0.01658463050937938,
+      "px_share_nir": 0.018625588553897895
+     }
+    }
+   }
+  },
+  "blocked": {
+   "train": {
+    "n_frames": 11383,
+    "n_paddy": 6610,
+    "n_field": 4773,
+    "classes": {
+     "common_road": {
+      "frames_rgb": 8313,
+      "frames_nir": 8283,
+      "frames_union": 8346,
+      "px_share_rgb": 0.05370660100152575,
+      "px_share_nir": 0.07198341902236824
+     },
+     "common_tree": {
+      "frames_rgb": 6201,
+      "frames_nir": 6136,
+      "frames_union": 6458,
+      "px_share_rgb": 0.08945503108108195,
+      "px_share_nir": 0.08813441060036639
+     },
+     "field_furrow": {
+      "frames_rgb": 658,
+      "frames_nir": 677,
+      "frames_union": 822,
+      "px_share_rgb": 0.0006590831722744444,
+      "px_share_nir": 0.0006687345266117516
+     },
+     "field_levee": {
+      "frames_rgb": 1179,
+      "frames_nir": 1037,
+      "frames_union": 1250,
+      "px_share_rgb": 0.0037962781548917116,
+      "px_share_nir": 0.004064977720366457
+     },
+     "paddy_before_driving": {
+      "frames_rgb": 1825,
+      "frames_nir": 1790,
+      "frames_union": 2013,
+      "px_share_rgb": 0.0056105431883286564,
+      "px_share_nir": 0.006111070727514629
+     },
+     "paddy_after_driving": {
+      "frames_rgb": 5646,
+      "frames_nir": 5622,
+      "frames_union": 5804,
+      "px_share_rgb": 0.06289570485495656,
+      "px_share_nir": 0.07212535637374404
+     },
+     "paddy_edge": {
+      "frames_rgb": 3473,
+      "frames_nir": 3525,
+      "frames_union": 3628,
+      "px_share_rgb": 0.015470560163031215,
+      "px_share_nir": 0.015537761674939237
+     },
+     "paddy_rice": {
+      "frames_rgb": 1220,
+      "frames_nir": 1224,
+      "frames_union": 1401,
+      "px_share_rgb": 0.00410476571206977,
+      "px_share_nir": 0.0047325387564100575
+     }
+    }
+   },
+   "val": {
+    "n_frames": 4407,
+    "n_paddy": 4086,
+    "n_field": 321,
+    "classes": {
+     "common_road": {
+      "frames_rgb": 3688,
+      "frames_nir": 3668,
+      "frames_union": 3742,
+      "px_share_rgb": 0.06029691059399707,
+      "px_share_nir": 0.07572645166849643
+     },
+     "common_tree": {
+      "frames_rgb": 9,
+      "frames_nir": 0,
+      "frames_union": 9,
+      "px_share_rgb": 3.2198837244223765e-05,
+      "px_share_nir": 0.0
+     },
+     "field_furrow": {
+      "frames_rgb": 761,
+      "frames_nir": 714,
+      "frames_union": 908,
+      "px_share_rgb": 0.0014732929793343477,
+      "px_share_nir": 0.0016605698911769154
+     },
+     "field_levee": {
+      "frames_rgb": 1322,
+      "frames_nir": 1378,
+      "frames_union": 1467,
+      "px_share_rgb": 0.008424908797334454,
+      "px_share_nir": 0.009652670543909645
+     },
+     "paddy_before_driving": {
+      "frames_rgb": 998,
+      "frames_nir": 872,
+      "frames_union": 1211,
+      "px_share_rgb": 0.0073193449967631705,
+      "px_share_nir": 0.007125641439282203
+     },
+     "paddy_after_driving": {
+      "frames_rgb": 2378,
+      "frames_nir": 2430,
+      "frames_union": 2522,
+      "px_share_rgb": 0.07612765667128832,
+      "px_share_nir": 0.09926497657400549
+     },
+     "paddy_edge": {
+      "frames_rgb": 498,
+      "frames_nir": 666,
+      "frames_union": 754,
+      "px_share_rgb": 0.0014860024520927046,
+      "px_share_nir": 0.001979712308042686
+     },
+     "paddy_rice": {
+      "frames_rgb": 2624,
+      "frames_nir": 2464,
+      "frames_union": 2730,
+      "px_share_rgb": 0.05473438961648024,
+      "px_share_nir": 0.05776526191689803
+     }
+    }
+   }
+  }
+ }
+}
