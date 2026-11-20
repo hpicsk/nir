@@ -1,0 +1,25 @@
+{
+ "min_val_frames": 50,
+ "min_train_frames": 200,
+ "site_selection_val": [
+  2,
+  754
+ ],
+ "site_selection_train": [
+  0,
+  822
+ ],
+ "classes_scored_val": [
+  29,
+  54
+ ],
+ "n_counts_compared": 912,
+ "val": [
+  29,
+  54
+ ],
+ "train": [
+  0,
+  822
+ ]
+}

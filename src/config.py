@@ -172,7 +172,7 @@ gates were committed and its verdict ships as it fell (below).
     still computed pooled over all 3 folds exactly as written - re-scoping it
     to drop site000 after seeing E3 fail would be post-hoc recalibration
     and is refused. The headline is untouched: it rests
-    on phases A/C plus the independent leakage_isolation.py leakage isolation, and fold
+    on phases A/C plus the independent frame-fixed seen-vs-unseen probe, and fold
     site002 passes E3 cleanly.
 
   ENV-STRATIFIED RE-SPLIT CONSIDERED AND REJECTED AS INFEASIBLE (measured,
@@ -259,8 +259,8 @@ are untouched.
         conditions are Paddy-only, so the env restriction cancels and the
         remaining difference is site blocking. Reported per arm, since a gap
         present in every arm is generic memorization while an NIR-concentrated
-        gap is the study's finding (same logic as leakage_isolation.py).
-    G2b FRAME-FIXED PAIRED TEST - leakage_isolation.py's design lifted into the Paddy
+        gap is the study's finding (same logic as the frame-fixed probe of phases A/C).
+    G2b FRAME-FIXED PAIRED TEST - the frame-fixed probe's design lifted into the Paddy
         regime, and the stronger statement because evaluation frames are held
         IDENTICAL. For fold N the fixed set is
             S_N = { frame : env==PLOSO_ENV, site==siteN, osplit==val }
@@ -278,7 +278,7 @@ are untouched.
         nothing to G2b and is reported as contributing nothing; that it also
         has zero paddy_edge under ploso (above) is a second, independent
         reason and neither is engineered away.
-        DISCLOSED ASYMMETRY, as in leakage_isolation.py: pofficial trains on
+        DISCLOSED ASYMMETRY, as in the frame-fixed probe: pofficial trains on
         8299 frames vs
         ploso's 6630/8152/6610, so seen/unseen differ in data QUANTITY by up
         to 1.26x as well as in site coverage. Phase A-C measured an 86x split
@@ -408,6 +408,26 @@ H1); that of the luminance control at site000 of E1 and on both larger models
 both protocols cleared too. NIR's paired excess over each other
 configuration's inflation at site002 now spans zero on mit_b0 and under H, and
 over RGB's at site002 of G2 as well.
+
+2026-11-16 AMENDMENT (phase I ADDED; committed before its runs). Under the
+official split NIR leads RGB on paddy_edge (isec 0.339 vs 0.009), and NIR is
+the only arm supervised on the NIR annotation, so in phases A-H the NIR input
+and the NIR annotation never vary apart. Phase I adds the one arm that crosses
+them, DIAG_ARM = NIRonRGB: the NIR image (3ch, as the NIR arm) supervised on
+the RGB annotation. 5 runs = 1 arm x 5 seeds, official protocol, mit_b0,
+locked hyperparameters and the committed seed set; the sampler weights are
+the RGB-union-NIR ones every arm shares. It enters no family of analyze.py
+and no gate of analyze_folds.py; its comparisons and the meaning of each
+outcome are committed in src/phases/annotation_diagnosis.py (D5), with the
+label and per-frame readings (D1-D4) that need no run.
+
+2026-11-17 AMENDMENT (committed before S1 runs; no run, no criterion of
+phases A-I changes). annotation_diagnosis.py's SHIFT_PX = 16 is CHOSEN on the
+argument that the search contains the camera offset, but 45% of the
+validation frames that mark the paddy edge in both annotations reach it. S1
+repeats the label registration at 32 and 48 px on the CPU and reads D1's
+registered agreement and D2 at each bound; its meanings are committed in
+that module's docstring (S1).
 """
 
 import json
@@ -455,6 +475,9 @@ TARGETS = ["paddy_edge", "field_furrow", "field_levee",
            "paddy_before_driving", "paddy_after_driving"]
 CONTROLS = ["common_road", "common_tree"]  # held-out non-targets
 ENVS = ["Paddy", "Field"]
+# Phase I: the NIR image supervised on the RGB annotation (2026-11-16 ledger
+# entry). It is a diagnostic arm, not an input configuration of the study.
+DIAG_ARM = "NIRonRGB"
 
 # ---- data build ----
 FRAME_STRIDE = 5
@@ -527,6 +550,8 @@ MODEL_TAG = {("segformer", "mit_b0"): "",             # headline
 #      x 4 arms x 5 seeds. Phase F varied encoder size within one family;
 #      H varies the family itself, discharging the baseline objection
 #      that the negative redundancy claim rests on a 2021 design.
+#   I  diagnostic arm NIRonRGB under the official split: 5 seeds. Crosses
+#      the NIR input with the RGB annotation (annotation_diagnosis.py D5).
 #   (B  single-environment training - LEFT the matrix 2026-09-22; see ledger
 #       amendment.)
 #   (D  LiDAR arms - REMOVED 2026-07-23, never ran; see ledger amendment.)
@@ -587,5 +612,10 @@ for _seed in SEEDS:
                 _run(_arm, _seed, _proto, "H",
                      backbone=BACKBONE_H, arch=ARCH_H))
 
-assert len(RUN_MATRIX) == 240, len(RUN_MATRIX)
-assert len({r["run_id"] for r in RUN_MATRIX}) == 240
+# Phase I - the diagnostic arm under the official split (2026-11-16 ledger
+# entry), last in the matrix so that every earlier row keeps its queue slot.
+for _seed in SEEDS:
+    RUN_MATRIX.append(_run(DIAG_ARM, _seed, "official", "I"))
+
+assert len(RUN_MATRIX) == 245, len(RUN_MATRIX)
+assert len({r["run_id"] for r in RUN_MATRIX}) == 245

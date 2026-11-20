@@ -1,6 +1,6 @@
 """Full-study trainer: one arm x one seed x one protocol.
 
-Usage: python src/train.py {RGB|NIR|LUM|RGBNIR} {seed}
+Usage: python src/train.py {RGB|NIR|LUM|RGBNIR|NIRonRGB} {seed}
        {blocked|official|losoNNN|plosoNNN|pofficial} all
        [backbone] [arch]
 The first four arguments are explicit; the 5th and 6th default to the
@@ -45,6 +45,10 @@ Arms:
           The format control: LUM has NIR's single-channel input, so
           NIR>LUM cannot come from the format. The two still differ in
           band and in the annotation each trains on.
+  NIRonRGB  the NIR image exactly as the NIR arm receives it, supervised on
+          the RGB annotation (config.py DIAG_ARM, phase I). It crosses the
+          two factors that the NIR arm varies together, the input band and
+          the annotation; annotation_diagnosis.py reads it.
   RGBNIR  mid-fusion: two ImageNet-initialized encoders (RGB stream /
           NIR-3ch stream; model per config.py - segformer/mit_b0 default,
           mit_b2 in phase F, upernet/ConvNeXt-V2 in phase H), stage-wise
@@ -105,7 +109,7 @@ import config as C
 IMNET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
 IMNET_STD = np.array([0.229, 0.224, 0.225], np.float32)
 SUP_MASK = {"RGB": "mask_rgb", "LUM": "mask_rgb",
-            "NIR": "mask_nir", "RGBNIR": "mask_rgb"}
+            "NIR": "mask_nir", "RGBNIR": "mask_rgb", C.DIAG_ARM: "mask_rgb"}
 
 
 # Decoder class and its channel-width keyword per architecture. Both smp
@@ -178,7 +182,7 @@ class FSSeg(Dataset):
         if self.arm == "LUM":
             g = cv2.cvtColor(cv2.imread(r["img_rgb"]), cv2.COLOR_BGR2GRAY)
             chans.append(np.repeat(g[..., None], 3, axis=2))
-        if self.arm in ("NIR", "RGBNIR"):
+        if self.arm in ("NIR", "RGBNIR", C.DIAG_ARM):
             g = cv2.imread(r["img_nir"], cv2.IMREAD_GRAYSCALE)
             chans.append(np.repeat(g[..., None], 3, axis=2))
         return np.concatenate(chans, axis=2)  # 3 or 6 channels

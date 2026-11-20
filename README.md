@@ -1,4 +1,4 @@
-# Near-infrared's apparent advantage over RGB in paddy and dry-field traversability segmentation comes from site leakage
+# Near-infrared's lead over RGB in paddy-edge segmentation is absent at recording sites held out of training
 
 Does forward-facing near-infrared (NIR) add traversability signal to RGB for
 farm-machinery navigation, or does its apparent advantage come from site
@@ -7,16 +7,17 @@ manuscript for a leakage-aware answer on the AI Hub *Precision Agriculture Farm
 Machinery Autonomous Driving* dataset (rice-paddy and dry-field agricultural
 driving).
 
-The study compares four input configurations under protocols that either admit or
-control cross-site leakage:
+The study compares four input configurations under splits that either share
+GPS sites between training and evaluation or hold whole sites out:
 
 - **RGB**, **NIR**, **LUM** (the luminance control: the Rec. 601 luma of the
   RGB image, a single grayscale channel in NIR's single-channel format and
-  with no NIR information), and **RGB+NIR** fusion.
-- **Site-blocked** and **leave-one-site-out** protocols (train and evaluate on
-  disjoint GPS sites) against the dataset's sequence-level split, plus a
-  paddy-restricted leave-one-site-out cross-validation and its matched
-  comparator.
+  with no NIR information), and **RGB+NIR** fusion, plus one diagnostic
+  network, **NIRonRGB**, which receives the NIR image and trains on the RGB
+  annotation.
+- The dataset's own split (sequences apart, sites shared), a leave-one-site-out
+  cross-validation over the three GPS sites, a rice-paddy leave-one-site-out
+  cross-validation, and the dataset's split restricted to rice paddy.
 - Three evaluation ground truths (RGB annotations, NIR annotations, and their
   intersection, the pixels on which the two annotations agree, where a
   configuration cannot gain by matching its own annotation).
@@ -24,13 +25,13 @@ control cross-site leakage:
   (MiT-B2 alongside the primary MiT-B0) and a second architecture family
   (UPerNet/ConvNeXt-V2) for robustness.
 
-The headline finding is that, for daylight paddy and dry-field driving, no
-configuration outperforms RGB at every held-out site. Fusion's gain over RGB on
-the tilled paddy surface at the site-blocked protocol's held-out site reverses
-sign at another site, and NIR's apparent advantage on the paddy edge under the
-dataset's sequence-level split comes from site leakage, which raises NIR's
-IoU relative to RGB's. The quantified claims live in the manuscript; every
-one is re-derived from on-disk data by `test_assertions.py`.
+Under the dataset's split NIR leads RGB on the paddy edge, and the diagnostic
+network credits neither the NIR image nor the NIR annotation alone with that
+lead; at the held-out sites no configuration outperforms RGB at every site on
+any of five traversability classes, and training with other frames of one site raises
+every configuration's paddy-edge IoU there, NIR's by the most. The quantified
+claims live in the manuscript; every one is re-derived from on-disk data by
+`test_assertions.py`.
 
 ## Repository structure
 
@@ -44,7 +45,7 @@ nlr/
 ├── test_assertions.py            # Manuscript-claim assertions (pytest target)
 │
 ├── src/
-│   ├── config.py                 # Locked protocol record: seeds 0-4, the 240-run
+│   ├── config.py                 # Locked protocol record: seeds 0-4, the 245-run
 │   │                             #   matrix, the protocols, the numeric gates, and
 │   │                             #   the amendment ledger
 │   ├── train.py                  # One run: arm x seed x protocol (x backbone x arch);
@@ -53,6 +54,8 @@ nlr/
 │   │                             #   paired Wilcoxon, clustered CI, Holm over targets
 │   ├── analyze_folds.py          # Fold, second-backbone and second-architecture
 │   │                             #   analyzer: gates E1-E3, F1-F2, G1-G3, H1-H2
+│   ├── minima_range.py           # Frame minima that select the same site and
+│   │                             #   score the same classes
 │   ├── build_parameters.py       # -> paper/params.tex (generated region)
 │   ├── build_tables.py           # -> the manuscript's three generated tables
 │   ├── build_figures.py          # -> paper/fig_leakage_isolation.pdf
@@ -63,9 +66,11 @@ nlr/
 │   │   ├── splits_blocked.py     #   GPS track-distance clustering into sites
 │   │   ├── build_index.py        #   Stride-5 scene-matched frames, both annotations
 │   │   ├── run_queue.py          #   Resumable sequential queue over the matrix
-│   │   ├── leakage_isolation.py  #   Frame-fixed seen-vs-unseen test, per arm
 │   │   ├── geometry_probe.py     #   GPS and environment composition, read-only
-│   │   └── camera_offset.py      #   Offset between the two cameras, read-only
+│   │   ├── camera_offset.py      #   Offset between the two cameras, read-only
+│   │   └── annotation_diagnosis.py  # The two annotations of each class compared,
+│   │                             #   and NIR's paddy-edge lead decomposed into the
+│   │                             #   band and the annotation (phase I)
 │   │
 │   └── preliminary/              # The 2026-07-11 feasibility experiment
 │       ├── build_index.py        #   Shared-index frames, stride 15
@@ -80,13 +85,17 @@ nlr/
 │       └── geometry_probe.json   #   Site separation and environment composition
 │
 ├── results/
-│   ├── runs/<run_id>/            # metrics.json + perframe.npz per run (240); model.pt
+│   ├── runs/<run_id>/            # metrics.json + perframe.npz per run (245); model.pt
 │   │                             #   is not tracked
 │   ├── preliminary_runs/<run>/   # metrics.json per preliminary arm
 │   ├── summary.md                # Phase A and C comparison tables
 │   ├── folds.md                  # Phase E/F/G/H criterion tables
+│   ├── minima_range.json         # Range of each frame minimum, minima_range.py
+│   ├── annotation_agreement.npz  # Per-frame agreement of the two annotations
+│   ├── annotation_diagnosis.json # Comparisons D1-D5 and S1, annotation_diagnosis.py
+│   ├── registration_sensitivity.npz # The registration at three search bounds (S1)
 │   ├── inventory.json  integrity_checks.json
-│   └── leakage_isolation.json  camera_offset.json
+│   └── camera_offset.json
 │
 └── paper/                        # main.tex, params.tex, references.bib, the three
                                   #   generated tables and the figure, and
@@ -127,14 +136,15 @@ python src/phases/inventory.py                          # -> results/inventory.j
 python src/phases/integrity_checks.py                   # -> results/integrity_checks.json
 python src/phases/splits_blocked.py                     # -> data/processed/splits_blocked.json
 python src/phases/build_index.py                        # -> data/study/frames/, data/processed/index.json
-CUDA_VISIBLE_DEVICES=<gpu> python src/phases/run_queue.py 0 1 ACEFGH
-python src/phases/leakage_isolation.py                  # -> results/leakage_isolation.json
+CUDA_VISIBLE_DEVICES=<gpu> python src/phases/run_queue.py 0 1 ACEFGHI
 python src/phases/camera_offset.py                      # -> results/camera_offset.json
+python src/phases/annotation_diagnosis.py measure       # -> results/annotation_agreement.npz
+python src/phases/annotation_diagnosis.py sensitivity   # -> results/registration_sensitivity.npz
 ```
 
 To shard the queue across two GPUs, run two shells with queue index 0 and 1 of 2
-on separate devices (`... run_queue.py 0 2 ACEFGH` and `... run_queue.py 1 2
-ACEFGH`). Runs that already have a `metrics.json` are skipped, so the queue is
+on separate devices (`... run_queue.py 0 2 ACEFGHI` and `... run_queue.py 1 2
+ACEFGHI`). Runs that already have a `metrics.json` are skipped, so the queue is
 resumable after an interruption.
 
 ## Running a single stage
@@ -164,7 +174,9 @@ quantification, 4 × 5, 20) · **E** leave-one-site-out cross-validation (2 run 
 **G** paddy-restricted leave-one-site-out cross-validation (3 folds × 4 × 5, 60) plus the
 `pofficial` matched comparator (4 × 5, 20) · **H** UPerNet/ConvNeXt-V2 second
 *architecture family* over the same two protocols (2 × 4 × 5, 40): F varies encoder
-size within one family, H varies the family itself. 240 runs total.
+size within one family, H varies the family itself · **I** a network given the NIR
+image and trained on the RGB annotation under the dataset's own split (1 × 5, 5), which
+separates the band from the annotation in NIR's paddy-edge lead. 245 runs total.
 
 ## The preliminary experiment
 

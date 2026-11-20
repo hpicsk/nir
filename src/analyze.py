@@ -276,6 +276,19 @@ def paired_p(d, cls, cell):
     return float(stats.wilcoxon(d).pvalue)
 
 
+# Every frame count that evaluable() has compared with MIN_VAL_FRAMES in this
+# process. minima_range.py reads it to find the minima that score the same
+# classes.
+EVAL_COUNTS = []
+
+
+def evaluable(n_frames):
+    """sec:protocols scores only evaluable classes: those whose ground truth
+    marks them on at least MIN_VAL_FRAMES validation frames."""
+    EVAL_COUNTS.append(n_frames)
+    return n_frames >= C.MIN_VAL_FRAMES
+
+
 def paired_family(runs, protocol, arm_x, arm_y, proto, px):
     """Per-class paired stats for arm_x - arm_y on one label protocol."""
     rx = [m for m in runs if m["arm"] == arm_x and m["protocol"] == protocol
@@ -290,9 +303,7 @@ def paired_family(runs, protocol, arm_x, arm_y, proto, px):
         fx = frame_iou_by_arm(rx, proto, ci, inc_own(proto), px)
         fy = frame_iou_by_arm(ry, proto, ci, inc_own(proto), px)
         shared = sorted(set(fx) & set(fy))
-        # sec:protocols scores only evaluable classes: those whose ground
-        # truth marks them on at least MIN_VAL_FRAMES validation frames.
-        if len(shared) < C.MIN_VAL_FRAMES:
+        if not evaluable(len(shared)):
             out[cls] = None
             continue
         d = np.array([fx[k] - fy[k] for k in shared])

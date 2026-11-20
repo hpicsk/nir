@@ -84,9 +84,9 @@ def test_shared_frame_count():
         f"but integrity data shows {n}")
 
 
-def test_studied_envs_paired_frame_count():
+def test_the_scene_matched_frame_count():
     # the manuscript's number: the same count restricted to config.py ENVS,
-    # which is where \nPairedFrames is re-anchored in build_parameters.py
+    # which is where \nSceneMatchedFrames is re-anchored in build_parameters.py
     corr = _load("inventory.json")["rgb_nir_correspondence"]
     n = sum(r.get("shared_frame_indices", 0)
             for r in corr if r["env"] in config.ENVS)
@@ -164,16 +164,17 @@ def test_official_split_site_leakage():
         f"train and val sequences of the sequence-level split; data shows {len(leaks)}")
 
 
-def test_studied_envs_official_split_leakage():
-    """Manuscript sec. materials: 'among the 1066 ... sequence pairs, we count
-    270 GPS-footprint overlaps'. The count and the pairs it is counted
-    among are read off the footprint check's own record, and every overlap
-    has to be one of those pairs, or the first number is not a share of the
-    second."""
+def test_every_validation_sequence_overlaps_a_training_sequence():
+    """Manuscript sec. materials: 'In the two studied environments, each validation sequence overlaps one or more training sequences, and
+    the 1066 training-validation sequence pairs include 270 overlapping
+    pairs.' The count and the pairs
+    it is counted among are read off the footprint check's own record, and
+    every overlap has to be one of those pairs, or the first number is not a
+    share of the second."""
     integ = _load("integrity_checks.json")
     # the manuscript's numbers: the check restricted to config.py ENVS, which
-    # is where build_parameters.py re-anchors \nOfficialOverlaps and
-    # \nOfficialPairs
+    # is where build_parameters.py re-anchors \nOverlappingPairs and
+    # \nSequencePairs
     studied = {sp: {q for q in integ["gps_sequences"][sp]
                     if q.split("/")[0] in config.ENVS}
                for sp in ("train", "val")}
@@ -181,20 +182,25 @@ def test_studied_envs_official_split_leakage():
              if lk["train"].split("/")[0] in config.ENVS
              and lk["val"].split("/")[0] in config.ENVS]
     assert len(leaks) == 270, (
-        "Manuscript sec. concentration claims the sequence-level split has "
-        "'270' GPS-footprint overlaps, but the overlaps over "
+        "Manuscript sec. materials says 270 pairs of a training and a "
+        "validation sequence overlap, but the overlaps over "
         f"ENVS={config.ENVS} number {len(leaks)}")
     pairs = len(studied["train"]) * len(studied["val"])
     assert pairs == 1066, (
-        "Manuscript sec. concentration counts the overlaps among '1066' "
+        "Manuscript sec. materials counts the overlaps among '1066' "
         "training-validation sequence pairs, but the sequences the footprint "
         f"check compared over ENVS={config.ENVS} give {pairs}")
     outside = [lk for lk in leaks if lk["train"] not in studied["train"]
                or lk["val"] not in studied["val"]]
     assert not outside, (
-        "manuscript sec. concentration prints the overlaps as a count among "
+        "manuscript sec. materials prints the overlaps as a count among "
         "the training-validation sequence pairs, but these overlaps name a "
         f"sequence the pairs do not hold: {outside[:3]}")
+    lone = sorted(studied["val"] - {lk["val"] for lk in leaks})
+    assert not lone, (
+        "Manuscript sec. intro: every validation sequence was recorded on "
+        "ground that a training sequence also covers, but these overlap none: "
+        f"{lone}")
 
 
 # ------------- full study: site-blocked split invariants (splits_blocked.py) -------
@@ -226,14 +232,14 @@ def test_blocked_split_zero_track_leakage():
         f"min cross-split distance is {float(d.min()):.2f} m")
 
 
-def test_blocked_split_share_and_class_floors():
+def test_the_site_c_fold_share_and_class_minima():
     sp = _splits()
     st = sp["stats"]
     # Sec. methods prints the index size beside the share it is a share of,
     # because both populations are counted in 'frames' and a reader who takes
     # the share of the paired-frame count lands five times high.
     params = _read_params()
-    m = re.search(r"\\newcommand\{\\nIndexFrames\}\{(\d+)\}", params)
+    m = re.search(r"\\newcommand\{\\nSampledFrames\}\{(\d+)\}", params)
     assert m and int(m.group(1)) == st["n_frames_total"], (
         "sec. methods states the site-blocked validation share as a share "
         f"'of the index'; the index holds {st['n_frames_total']} frames and the "
@@ -255,7 +261,52 @@ def test_blocked_split_share_and_class_floors():
             f"for {cls}: {d}")
 
 
-def test_dataset_has_three_gps_supersites():
+def test_the_printed_minima_ranges_select_the_same_site_and_classes():
+    """Manuscript sec. protocols: 'The fold and the scored classes stay the same for any scoring minimum
+    from 29 to 54 frames in place of 50, and for any training minimum up to
+    822 frames in place of 200.' The macros are read from
+    results/minima_range.json, and each end of each range is recomputed here,
+    each minimum varied with the other held fixed: the end itself keeps the
+    selected site and the scored classes, and the next value beyond it does
+    not."""
+    M = importlib.import_module("minima_range")
+    got = json.load(open(os.path.join(RES, "minima_range.json")))
+    params = _read_params()
+    for macro, value in (("minValLo", got["val"][0]), ("minValHi", got["val"][1]),
+                         ("minTrainHi", got["train"][1])):
+        m = re.search(rf"\\newcommand\{{\\{macro}\}}\{{(\d+)\}}", params)
+        assert m and int(m.group(1)) == value, (
+            f"sec. protocols prints \\{macro} as {m.group(1) if m else 'nothing'}, "
+            f"but src/minima_range.py gives {value}")
+    lo, hi = got["val"]
+    t_hi = got["train"][1]
+    assert lo <= config.MIN_VAL_FRAMES <= hi and config.MIN_TRAIN_FRAMES <= t_hi, (
+        "the committed minima lie outside the ranges that sec. protocols prints")
+    sites = _splits()["sites"]
+    base = M.selected(sites, config.MIN_VAL_FRAMES, config.MIN_TRAIN_FRAMES)
+    counts = M.evaluation_counts()
+
+    def same(v, t):
+        scored = all((n >= v) == (n >= config.MIN_VAL_FRAMES) for n in counts)
+        return scored and M.selected(sites, v, t) == base
+    assert same(lo, config.MIN_TRAIN_FRAMES) and same(hi, config.MIN_TRAIN_FRAMES), (
+        f"a validation minimum of {lo} or {hi} changes the selected site or the "
+        "scored classes, which sec. protocols says it keeps")
+    assert not same(lo - 1, config.MIN_TRAIN_FRAMES), (
+        f"a validation minimum of {lo - 1} also keeps the selected site and the "
+        f"scored classes, so the printed range does not start at {lo}")
+    assert not same(hi + 1, config.MIN_TRAIN_FRAMES), (
+        f"a validation minimum of {hi + 1} also keeps the selected site and the "
+        f"scored classes, so the printed range does not end at {hi}")
+    assert same(config.MIN_VAL_FRAMES, 0) and same(config.MIN_VAL_FRAMES, t_hi), (
+        f"a training minimum of 0 or {t_hi} changes the selected site, which "
+        "sec. protocols says it keeps")
+    assert not same(config.MIN_VAL_FRAMES, t_hi + 1), (
+        f"a training minimum of {t_hi + 1} also selects the same site, so the "
+        f"printed range does not end at {t_hi}")
+
+
+def test_the_sequences_cluster_into_three_sites():
     sp = _splits()
     assert len(sp["sites"]) == 3, (
         "Report/manuscript claim: the dataset collapses to exactly 3 GPS "
@@ -325,9 +376,11 @@ def _param_counts(arch, backbone):
 
 
 def test_single_stream_arms_are_one_network_at_one_parameter_count():
-    """Manuscript sec. methods: 'RGB, NIR, and the luminance control have the
-    same architecture and the same parameter count'. Replicating a single
-    band across three channels is what buys that, so an _input() that
+    """Manuscript sec. methods: 'The NIR configuration receives the single
+    channel of the NIR image copied into all three input channels' and the
+    luminance control's grayscale is 'copied in the same way', so RGB, NIR and
+    the luminance control are one network at one parameter count. Replicating
+    a single band across three channels is what buys that, so an _input() that
     stopped replicating would change the stem and break the match."""
     for arch, backbone in config.MODEL_TAG:
         single = {a: n for a, n in _param_counts(arch, backbone).items()
@@ -340,9 +393,9 @@ def test_single_stream_arms_are_one_network_at_one_parameter_count():
 
 def test_both_repeats_carry_more_parameters_than_the_primary_model():
     """Manuscript sec. methods: 'Both repeats carry more parameters than the
-    primary model, so neither can fall short of it for lack of capacity.'
-    Compared configuration by configuration, over every model config.py
-    registers; the primary model is the one whose run tag is empty."""
+    primary model'. Compared configuration by configuration, over every model
+    config.py registers; the primary model is the one whose run tag is
+    empty."""
     counts = {k: _param_counts(*k) for k in config.MODEL_TAG}
     primary = next(k for k, tag in config.MODEL_TAG.items() if not tag)
     smaller = [(k, a) for k in counts if k != primary for a in counts[k]
@@ -353,11 +406,12 @@ def test_both_repeats_carry_more_parameters_than_the_primary_model():
 
 
 def test_each_arm_trains_on_the_annotation_the_manuscript_names():
-    """Manuscript sec. methods: 'Each of these three configurations trains on
-    the annotation of the camera whose image it receives: NIR on the NIR annotation, and RGB and
-    the luminance control on the RGB annotation. Fusion trains on the RGB
-    annotation too, so that its comparison with RGB isolates the added NIR
-    input.'
+    """Manuscript sec. intro: 'NIR trains on the NIR annotation and the other
+    configurations on the RGB annotation'; sec. methods: 'RGB, the luminance
+    control and fusion train on the RGB annotation, so that the comparison
+    of fusion with RGB isolates the added NIR input.' and a fifth, diagnostic configuration
+    'receives the NIR image as the NIR configuration does and trains on the
+    RGB annotation.'
 
     That sentence replaced one claiming the input bands were the only factor
     that varied between the matched three, which src/train.py SUP_MASK contradicts.
@@ -366,20 +420,30 @@ def test_each_arm_trains_on_the_annotation_the_manuscript_names():
     names, so an arm added later has to be placed by the sentence too."""
     train = importlib.import_module("train")
     named = {"NIR": "mask_nir", "RGB": "mask_rgb",
-             "LUM": "mask_rgb", "RGBNIR": "mask_rgb"}
+             "LUM": "mask_rgb", "RGBNIR": "mask_rgb", config.DIAG_ARM: "mask_rgb"}
     assert train.SUP_MASK == named, (
         "Manuscript sec. methods claims near-infrared trains on the "
-        "near-infrared annotation and the other three configurations on the "
-        f"RGB annotation, but src/train.py SUP_MASK is {train.SUP_MASK}")
+        "near-infrared annotation and the other three configurations and the "
+        "diagnostic network on the RGB annotation, but src/train.py SUP_MASK "
+        f"is {train.SUP_MASK}")
+    ds = train.FSSeg([], config.DIAG_ARM, train=False)
+    rec = {"img_rgb": None, "img_nir": _index()[0]["img_nir"]}
+    rec["img_nir"] = os.path.join(config.STUDY_DATA, rec["img_nir"])
+    if os.path.exists(rec["img_nir"]):
+        ref = train.FSSeg([], "NIR", train=False)._input(rec)
+        assert np.array_equal(ds._input(rec), ref), (
+            "Manuscript sec. methods says the diagnostic network receives the "
+            "NIR image as the NIR configuration does, but src/train.py builds "
+            "a different input for it")
 
 
 def test_fusion_carries_a_parameter_surplus():
-    """Manuscript sec. methods, on the fusion configuration: 'In each of the
-    three models, fusion carries at least 1.8 times the parameters of a
-    single-stream configuration'. That
-    sentence discharges the two-stream BASELINE tag in src/train.py: the
-    surplus runs in fusion's favor, so the fusion nulls are not a capacity
-    handicap. Checked on every model in the matrix, not just the headline."""
+    """Manuscript sec. methods: 'On each model, fusion carries at least 1.8 times the parameters of a
+    configuration with one encoder, so fusion cannot fall short of RGB for
+    lack of capacity.'. That sentence
+    discharges the two-stream BASELINE tag in src/train.py: the surplus runs in
+    fusion's favor, so the fusion nulls are not a capacity handicap. Checked on
+    every model in the matrix, not just the headline."""
     for arch, backbone in config.MODEL_TAG:
         c = _param_counts(arch, backbone)
         ratio = c["RGBNIR"] / c["RGB"]
@@ -389,13 +453,6 @@ def test_fusion_carries_a_parameter_surplus():
             f"in every model reported, but {arch}/{backbone} gives "
             f"{ratio:.3f}x ({c['RGBNIR']} vs {c['RGB']})")
 
-
-# ------------- full study: leakage isolation (leakage_isolation.py) -------------
-# Framing-invariant diagnostic that settles the leakage-vs-site-difficulty
-# confound left open by the blocked result: it holds the site002 eval frames
-# FIXED and varies only whether the model trained on that site
-# (sequence-level=seen vs blocked=unseen). Every manuscript framing of the
-# paddy_edge collapse rests on this result.
 
 def test_every_module_constant_carries_a_dof_tag():
     """Every numeric value a module fixes at module level is a degree of
@@ -490,17 +547,17 @@ def test_every_baseline_tag_records_the_tuning_the_runs_received():
 
 
 def test_figure_one_shows_the_site_a_inflations():
-    """Caption of fig:leakage: 'A bar averages over five networks, one per
-    seed, and over the 256 frames of the site that the seen networks did not
-    train on and that both annotations mark with the paddy edge. Those frames
-    come from three recording sequences.' and 'Every configuration scores
-    higher with the site seen, NIR by the most.'
+    """Caption of fig:leakage: 'A bar averages the per-frame IoUs of five networks, one per seed, over
+    the 256 frames of site A that both annotations mark with
+    the paddy edge and that no network of the figure trains on. Those frames
+    come from three recording sequences.' and 'Every configuration
+    scores higher with the site seen, NIR by the most.'
 
     The bars are src/build_figures.py's, and a configuration's two bars differ
-    by its paddy-edge inflation at site A on the paddy-restricted
-    cross-validation, the site-A row of tab:robustness(a), so the figure and
-    the table cannot report different leaks. The frame and sequence counts the
-    caption prints are that inflation's."""
+    by its paddy-edge inflation at site A on the rice-paddy cross-validation,
+    the site-A row of tab:robustness(a), so the figure and the table cannot
+    report different leaks. The frame and sequence counts the caption prints
+    are that inflation's."""
     fig = importlib.import_module("build_figures")
     runs, px = _folds.load_runs("mit_b0"), _folds.A.gt_px()
     bars = fig.bars(runs, px)
@@ -523,9 +580,9 @@ def test_figure_one_shows_the_site_a_inflations():
     nir = _folds.paired_protocols(runs, "NIR", "pofficial", proto, "isec",
                                   px)["paddy_edge"]
     params = _read_params()
-    frames = re.search(r"\\newcommand\{\\gTwoSiteZeroFrames\}\{(\d+)\}",
+    frames = re.search(r"\\newcommand\{\\nInflationFramesSiteA\}\{(\d+)\}",
                        params).group(1)
-    seqs = re.search(r"\\newcommand\{\\gTwoSiteZeroSequences\}\{(\w+)\\xspace\}",
+    seqs = re.search(r"\\newcommand\{\\nInflationSequencesSiteA\}\{(\w+)\\xspace\}",
                      params).group(1)
     words = ast.literal_eval(re.search(
         r"^WORDS = (\{.*\})$",
@@ -584,7 +641,7 @@ def _fs_family_verdicts(arm_x, arm_y, protocol="blocked"):
     return {c: A.verdict(c, si.get(c), so.get(c), ph.get(c)) for c in TARGETS}
 
 
-def test_fullstudy_paddy_edge_leakage_headline():
+def test_the_paddy_edge_iou_of_nir_and_rgb_under_the_dataset_split():
     """sec. results headline: NIR paddy_edge is leakage-inflated on
     the sequence-level split (~0.339 isec) and collapses site-blocked (~0.015)."""
     runs = _study_runs()
@@ -608,11 +665,11 @@ def test_fullstudy_paddy_edge_leakage_headline():
         f"but they come from {sorted(sites)}")
 
 
-def test_neither_camera_is_better_on_the_paddy_edge_under_site_blocking():
-    """Manuscript sec. concentration: 'At site C, neither camera is better than
-    the other on the paddy edge, because the interval of their margin spans
-    zero (Table~\\ref{tab:margins}).' The verdict asserted is analyze.py verdict(), so the sentence
-    follows the three conditions rather than the interval alone."""
+def test_neither_camera_is_better_on_the_paddy_edge_at_site_c():
+    """Manuscript sec. redundancy: 'At site C, NIR is better than RGB on none
+    of the five target classes'. The verdict asserted is analyze.py verdict(),
+    so the sentence follows the three conditions rather than the interval
+    alone."""
     v = _fs_family_verdicts("NIR", "RGB")["paddy_edge"]
     assert v == "comparable", (
         "Manuscript sec. concentration reports that neither camera is better "
@@ -627,25 +684,48 @@ def test_neither_camera_is_better_on_the_paddy_edge_under_site_blocking():
         f"[{s['lo']:+.4f},{s['hi']:+.4f}]")
 
 
-def test_near_infrared_leads_color_on_the_paddy_edge_under_the_sequence_level_split():
-    """Manuscript sec. concentration: 'NIR is better than RGB there, with a
-    margin NIR $-$ RGB of +0.127', on the validation frames of the
-    sequence-level split that carry the class. The three
-    conditions place near-infrared above RGB there, as the abstract states:
-    'NIR outperforms RGB on the paddy edge'."""
-    v = _fs_family_verdicts("NIR", "RGB", protocol="official")["paddy_edge"]
-    assert v.startswith("DIRECTIONAL (+)"), (
-        "Manuscript sec. concentration: under the sequence-level split "
-        "near-infrared leads RGB on the paddy edge, which the directional "
-        f"rule must return in near-infrared's favor, but it returns '{v}'")
+def test_nir_is_better_than_rgb_on_the_paddy_edge_under_the_dataset_split():
+    """Manuscript sec. split: 'Under the dataset's split, NIR is better than
+    RGB on the paddy edge and on no other target class' and 'On the tilled
+    paddy surface, NIR's pooled IoU also exceeds RGB's, but the per-frame
+    comparison, which weights each frame equally, detects no difference', and
+    fusion 'is better than RGB on the paddy edge too'. The abstract: 'NIR scores a higher intersection-over-union (IoU) than RGB on the paddy
+    edge'."""
+    v = _fs_family_verdicts("NIR", "RGB", protocol="official")
+    wins = sorted(c for c, x in v.items() if x.startswith("DIRECTIONAL (+)"))
+    assert wins == ["paddy_edge"], (
+        "Manuscript sec. split: under the dataset's split near-infrared leads "
+        "RGB on the paddy edge and on no other target class, but the "
+        f"directional rule favors it on {wins}")
+    runs = _study_runs()
+    A = importlib.import_module("analyze")
+    s_ = A.paired_family(A.load_runs(), "official", "NIR", "RGB", "isec",
+                         A.gt_px())["paddy_after_driving"]
+    assert (_fs_iou(runs, "NIR", "official", "isec", "paddy_after_driving")
+            > _fs_iou(runs, "RGB", "official", "isec", "paddy_after_driving")
+            and s_["lo"] < 0 < s_["hi"]), (
+        "Manuscript sec. split: on the tilled surface NIR's pooled IoU exceeds "
+        "RGB's while the per-frame interval spans zero, but the interval is "
+        f"[{s_['lo']:+.3f}, {s_['hi']:+.3f}]")
+    f = _fs_family_verdicts("RGBNIR", "RGB", protocol="official")
+    assert f["paddy_edge"].startswith("DIRECTIONAL (+)"), (
+        "Manuscript sec. split: fusion is better than RGB on the paddy edge "
+        f"under the dataset's split, but the rule returns '{f['paddy_edge']}'")
+    # 'Scored on the NIR annotation, as the third condition requires, its
+    # paddy-edge margin over RGB is +0.207.'
+    on_nir = A.paired_family(A.load_runs(), "official", "NIR", "RGB",
+                             A.own_proto("NIR"), A.gt_px())["paddy_edge"]
+    assert (A.own_proto("NIR") == "nir" and on_nir["mean"] > 0
+            and _macro_value("nirRgbEdgeOnNir") == f"{on_nir['mean']:+.3f}"), (
+        "sec. split prints NIR's paddy-edge margin on the NIR annotation as "
+        f"{_macro_value('nirRgbEdgeOnNir')}, and the runs give {on_nir['mean']:+.4f}")
 
 
-def test_near_infrared_is_better_than_color_on_no_class_under_site_blocking():
-    """Manuscript sec. redundancy: 'Under the site-blocked protocol, NIR is
-    better than RGB on none of the five target classes, the paddy edge included
-    ... NIR's pooled IoU exceeds RGB's on the untilled paddy surface, but the
-    per-frame margin NIR $-$ RGB on that surface is +0.006, with an interval
-    that spans zero'"""
+def test_nir_is_better_than_rgb_on_no_class_at_site_c():
+    """Manuscript sec. redundancy: 'At site C, NIR is better than RGB on none
+    of the five target classes ... NIR's pooled IoU exceeds RGB's on the
+    untilled paddy surface, but the per-frame comparison detects no
+    difference between the two.'"""
     v = _fs_family_verdicts("NIR", "RGB")
     wins = [c for c, x in v.items() if x.startswith("DIRECTIONAL (+)")]
     assert not wins, (
@@ -661,14 +741,13 @@ def test_near_infrared_is_better_than_color_on_no_class_under_site_blocking():
         f"but it is [{s['lo']:+.4f},{s['hi']:+.4f}]")
 
 
-def test_fullstudy_f2_nir_over_lum_does_not_survive_clustering():
-    """Manuscript sec. redundancy: 'On the primary model under the site-blocked
-    protocol, NIR is not better than the luminance control on either paddy
-    surface. On the tilled paddy surface, the interval of the margin NIR $-$
-    luminance control spans zero on the primary model and on both repeat models'
-    and 'On the untilled paddy surface, the margin's interval spans zero'. Both
-    surfaces are asserted through the three conditions, and the untilled one's
-    interval as well, because the sentence prints it."""
+def test_nir_over_the_luminance_control_at_site_c_is_not_detected():
+    """Manuscript sec. redundancy: 'At site C, NIR is not better than the luminance control on either paddy
+    surface. On the tilled surface, the comparison detects no difference on
+    any of the three models', and
+    tab:margins prints the untilled surface's interval. Both surfaces are
+    asserted through the three conditions, and the untilled one's interval as
+    well."""
     v = _fs_family_verdicts("NIR", "LUM")
     for cls in ("paddy_after_driving", "paddy_before_driving"):
         assert not v[cls].startswith("DIRECTIONAL"), (
@@ -679,17 +758,16 @@ def test_fullstudy_f2_nir_over_lum_does_not_survive_clustering():
     s = A.paired_family(A.load_runs(), "blocked", "NIR", "LUM", "isec",
                         A.gt_px())["paddy_before_driving"]
     assert s["lo"] < 0 < s["hi"], (
-        "Manuscript sec. redundancy says the untilled-surface margin's interval "
-        f"spans zero, but it is [{s['lo']:+.4f},{s['hi']:+.4f}]")
+        "Manuscript sec. redundancy says the paired comparison on the untilled "
+        f"surface detects no difference, but its interval is [{s['lo']:+.4f},{s['hi']:+.4f}]")
 
 
 def test_the_untilled_margin_changes_sign_across_the_held_out_sites():
-    """Manuscript sec. redundancy: 'Nor does the margin on the untilled surface
-    hold at every held-out site: the leave-one-site-out cross-validation gives
-    +0.012 at site A, -0.038 at site B, and +0.020 at site C, with a site-level
-    $p$ of 0.92.' The contrast is evaluable on all three leave-one-site-out
-    folds, its sign reverses across them, and the site-level test does not
-    separate it from zero."""
+    """Manuscript sec. redundancy: 'On the untilled surface, the
+    leave-one-site-out margin of NIR over the luminance control is +0.012 at
+    site A, -0.038 at site B, and +0.020 at site C'. The contrast is
+    evaluable on all three leave-one-site-out folds, its sign reverses across
+    them, and the site-level test does not separate it from zero."""
     runs = _folds.load_runs("mit_b0")
     px = _folds.A.gt_px()
     per = {f: _folds.A.paired_family(runs, p, "NIR", "LUM", "isec", px)
@@ -706,9 +784,9 @@ def test_the_untilled_margin_changes_sign_across_the_held_out_sites():
     assert min(per.values()) < 0 < max(per.values()), (
         "manuscript sec. redundancy reports the margin reverses sign across "
         f"the folds, but they are { {k: round(v, 4) for k, v in per.items()} }")
-    for fold, macro in (("site000", "nirLumBeforeSiteZero"),
-                        ("site001", "nirLumBeforeSiteLow"),
-                        ("site002", "nirLumBeforeBlocked")):
+    for fold, macro in (("site000", "nirLumUntilledSiteA"),
+                        ("site001", "nirLumUntilledSiteLow"),
+                        ("site002", "nirLumUntilledSiteC")):
         printed = re.search(r"\\newcommand\{\\" + macro
                             + r"\}\{\\ensuremath\{([+-]\d\.\d+)\}\}",
                             _read_params()).group(1)
@@ -717,50 +795,13 @@ def test_the_untilled_margin_changes_sign_across_the_held_out_sites():
             f"at fold {fold}, but that fold's mean is {per[fold]:+.4f}")
 
 
-def test_the_paddy_restricted_folds_cannot_score_the_untilled_surface_at_site_b():
-    """Manuscript sec. redundancy: 'The paddy-restricted cross-validation cannot
-    test that margin across the three sites, because at site B only dry-field
-    sequences carry the untilled surface on the intersection ground truth.' Both
-    halves are read from the runs: the fold confined to rice paddy scores no
-    such frame, and the frames that the leave-one-site-out fold scores there
-    are all of dry-field sequences."""
-    runs = _folds.load_runs("mit_b0")
-    px = _folds.A.gt_px()
-    ci = config.CLASSES.index("paddy_before_driving")
-    restricted = _folds.A.paired_family(runs, _folds.G_FOLD_PROTO["site001"],
-                                        "NIR", "LUM", "isec", px)
-    assert restricted.get("paddy_after_driving") is not None, (
-        "the paddy-restricted fold at site B scores no tilled surface either, "
-        "so its runs were not loaded")
-    assert restricted.get("paddy_before_driving") is None, (
-        "sec. redundancy says the paddy-restricted cross-validation does not "
-        "score the untilled surface at site B, but its fold there scores "
-        f"{restricted['paddy_before_driving']['n']} frames")
-    loso = [m for m in runs if m["protocol"] == _folds.E_FOLD_PROTO["site001"]
-            and m["train_env"] == "all" and m["_pf"] is not None]
-    scored = _folds.A.frame_iou_by_arm(loso, "isec", ci,
-                                       _folds.A.inc_own("isec"), px)
-    envs = {env for env, _seq, _frame in scored}
-    assert scored and envs == {"Field"}, (
-        "sec. redundancy says that at site B only dry-field sequences carry "
-        "the untilled surface on the intersection ground truth, but "
-        f"the leave-one-site-out fold there scores such frames from {envs}")
-
-
 def test_boot_resample_count_matches_the_analyzer():
-    """Manuscript sec. methods: 'The bootstrap draws 1e6 resamples, so that
-    the resampling error of each endpoint stays below the precision at which
-    the endpoint is printed.' \\bootResamples is generated from analyze.py
-    BOOT_N, so this fails when the analyzer is retuned and the parameter file
-    is not regenerated with it. The resampling error is read off the draw: a
-    second stream of the same size moves neither pooled endpoint by half a unit
-    of the third decimal, the digit the macros print."""
+    """Manuscript sec. criteria: 'comes from a cluster bootstrap'. tab:margins
+    prints each pooled endpoint to the third decimal, so the resampling error
+    of analyze.py BOOT_N resamples is read off the draw: a second stream of
+    the same size moves neither pooled endpoint by half a unit of that
+    decimal."""
     A = importlib.import_module("analyze")
-    body = re.search(r"\\newcommand\{\\bootResamples\}\{\\num\{(.+?)\}\}",
-                     _read_params()).group(1)
-    assert float(body) == A.BOOT_N, (
-        "Manuscript sec. methods claims the resample count is the analyzer's, "
-        f"but params.tex says {body} and analyze.py BOOT_N is {A.BOOT_N}")
     runs, px = _folds.load_runs("mit_b0"), _folds.A.gt_px()
     for fold_proto in (_folds.E_FOLD_PROTO, _folds.G_FOLD_PROTO):
         keys, d = _pooled_over_folds(runs, fold_proto.values(), "NIR", "LUM",
@@ -770,18 +811,63 @@ def test_boot_resample_count_matches_the_analyzer():
         second = A.boot_ci(d, u, seed=A.BOOT_SEED + 1)
         moved = max(abs(a - b) for a, b in zip(first, second))
         assert moved < 5e-4, (
-            "sec. methods says the resampling error of a pooled endpoint stays "
-            f"below the printed precision, but a second draw moves it {moved:.5f}")
+            "tab:margins prints each pooled endpoint to the third decimal, but a "
+            f"second draw moves it {moved:.5f}")
+
+
+def _diag_pairs():
+    """(units, per-frame deltas) behind each paddy-edge margin of
+    sec. split that src/phases/annotation_diagnosis.py computes, recomputed
+    here from the runs' per-frame counts and the committed agreement file
+    rather than read from the module's JSON."""
+    A = importlib.import_module("analyze")
+    D = importlib.import_module("phases.annotation_diagnosis")
+    px = A.gt_px()
+    runs = [m for m in A.load_runs() if m["protocol"] == "official"]
+
+    def fi(arm, proto):
+        return A.frame_iou_by_arm([m for m in runs if m["arm"] == arm], proto,
+                                  D.EDGE, A.inc_own(proto), px)
+
+    def pair(fx, fy, keys=None):
+        ks = sorted(set(fx) & set(fy) if keys is None
+                    else set(keys) & set(fx) & set(fy))
+        return A.seq_units(ks), np.array([fx[k] - fy[k] for k in ks])
+
+    z = np.load(D.AGREE_NPZ)
+    row = {(str(e), str(q), int(f)): i
+           for i, (e, q, f) in enumerate(zip(z["env"], z["seq"], z["frame"]))}
+    nir, rgb = fi("NIR", "isec"), fi("RGB", "isec")
+    agree = {k: z["inter_reg"][row[k], D.EDGE] / z["union_reg"][row[k], D.EDGE]
+             for k in nir}
+    med = float(np.median(list(agree.values())))
+    cross = fi(config.DIAG_ARM, "isec")
+    return {
+        "annUpperMarginCI": pair(nir, rgb, [k for k, a in agree.items()
+                                            if a >= med]),
+        "annLowerMarginCI": pair(nir, rgb, [k for k, a in agree.items()
+                                            if a < med]),
+        "nirRgbEdgeOnRgbCI": pair(fi("NIR", "rgb"), fi("RGB", "rgb")),
+        "fusionRgbEdgeSplitCI": pair(fi("RGBNIR", "isec"), rgb),
+        "diagRgbEdgeCI": pair(cross, rgb),
+        "nirDiagEdgeCI": pair(nir, cross),
+    }
 
 
 def test_every_interval_over_few_sequences_is_a_t_interval():
-    """Manuscript sec. criteria: 'The interval of each comparison that pools
-    all folds of a cross-validation therefore comes from a cluster bootstrap,
-    because those comparisons rest on 76 sequences on the leave-one-site-out
-    cross-validation and 72 sequences on the paddy-restricted one' and 'Every
-    other interval over sequences in this letter rests on at most 13
-    sequences, so it is a $t$ interval with $k-1$ degrees of freedom'. analyze.py makes the sort
-    with MIN_BOOT_UNITS, which lies between the two counts.
+    """Manuscript sec. criteria: 'Every interval below except two rests on at
+    most 13 sequences and is a $t$ interval ..., because a cluster bootstrap,
+    which resamples whole sequences, estimates the variance well only over
+    many sequences ... The two exceptions pool all folds of a cross-validation and are
+    cluster-bootstrap intervals of the margin of NIR over the luminance
+    control on the tilled surface. The interval on the
+    leave-one-site-out cross-validation resamples the 76 sequences with
+    tilled-surface frames, some of them dry-field sequences whose frames show
+    a tilled paddy, and the interval on the rice-paddy one resamples the 72
+    rice-paddy sequences.'
+    analyze.py makes the
+    sort with
+    MIN_BOOT_UNITS, which lies between the two counts.
 
     Both ends are derived. The intervals are every interval macro the
     manuscript prints, each recomputed here from the deltas behind it, and
@@ -796,46 +882,33 @@ def test_every_interval_over_few_sequences_is_a_t_interval():
         keys, d = _folds._pooled_deltas(runs, proto, ax, ay, cls, px)
         return A.seq_units(keys), sign * d
 
-    def infl(seen, unseen):
-        ci = config.CLASSES.index("paddy_edge")
-        f = {p: A.frame_iou_by_arm(
-                 [m for m in runs if m["arm"] == "NIR" and m["protocol"] == p
-                  and m["train_env"] == "all"], "isec", ci, A.inc_own("isec"), px)
-             for p in (seen, unseen)}
-        shared = sorted(set(f[seen]) & set(f[unseen]))
-        return A.seq_units(shared), np.array([f[seen][k] - f[unseen][k]
-                                              for k in shared])
-
     def pooled(fold_proto):
         keys, d = _pooled_over_folds(runs, fold_proto.values(), "NIR", "LUM",
                                      "paddy_after_driving", px)
         return A.seq_units(keys), d
 
-    liso = _load("leakage_isolation.json")["arms"]
     behind = {
-        "nirRgbEdgeBlockedCI": fam("blocked", "NIR", "RGB", "paddy_edge"),
-        "nirRgbBeforeBlockedCI": fam("blocked", "NIR", "RGB",
+        "nirRgbEdgeSiteCCI": fam("blocked", "NIR", "RGB", "paddy_edge"),
+        "nirRgbUntilledSiteCCI": fam("blocked", "NIR", "RGB",
                                      "paddy_before_driving"),
-        "nirLumBeforeBlockedCI": fam("blocked", "NIR", "LUM",
+        "nirLumUntilledSiteCCI": fam("blocked", "NIR", "LUM",
                                      "paddy_before_driving"),
-        "fusionColorBlockedCI": fam("blocked", "RGBNIR", "RGB",
+        "fusionRgbTilledSiteCCI": fam("blocked", "RGBNIR", "RGB",
                                     "paddy_after_driving"),
-        "fusionColorFurrowCI": fam("blocked", "RGBNIR", "RGB", "field_furrow",
+        "rgbFusionFurrowSiteCCI": fam("blocked", "RGBNIR", "RGB", "field_furrow",
                                    -1),
-        "suLumRgbCI": ([tuple(x.split("/"))
-                        for x in liso["LUM"]["isec"]["perframe_units"]],
-                       np.array(liso["LUM"]["isec"]["perframe_deltas"])
-                       - np.array(liso["RGB"]["isec"]["perframe_deltas"])),
-        "fusionColorUnrestrictedSiteOneCI": fam(
+        "fusionRgbTilledLeaveOutSiteBCI": fam(
             _folds.E_FOLD_PROTO["site001"], "RGBNIR", "RGB",
             "paddy_after_driving"),
-        "eOneNirSiteZeroCI": infl("official", _folds.E_FOLD_PROTO["site000"]),
-        "eTwoPooledCI": pooled(_folds.E_FOLD_PROTO),
-        "gThreePooledCI": pooled(_folds.G_FOLD_PROTO),
-        "nirRgbTreeOfficialCI": fam("official", "NIR", "RGB", "common_tree"),
+        "nirLumTilledLeaveOutCI": pooled(_folds.E_FOLD_PROTO),
+        "nirLumTilledRiceCI": pooled(_folds.G_FOLD_PROTO),
+        "nirRgbEdgeSplitCI": fam("official", "NIR", "RGB", "paddy_edge"),
+        "nirRgbTilledSplitCI": fam("official", "NIR", "RGB",
+                                     "paddy_after_driving"),
+        **_diag_pairs(),
     }
     printed = set(re.findall(r"\\(\w+CI)\b", _read_tex()))
-    printed.discard("nirLumAfterBlockedFrameCI")
+    printed.discard("nirLumTilledSiteCFrameCI")
     assert printed == set(behind), (
         "sec. criteria states which intervals are t-based, and this test "
         f"recomputes {sorted(behind)}, but the manuscript prints "
@@ -858,7 +931,7 @@ def test_every_interval_over_few_sequences_is_a_t_interval():
     t_ks += [infl_[k]["k"] for _, infl_ in rows_a
              for k in ["NIR"] + ["NIR-" + a for a in _gen_tables().CONTRAST_ARMS]]
     t_ks += [m["k"] for _, m in rows_b]
-    assert sorted(boot_ks) == ["eTwoPooledCI", "gThreePooledCI"], (
+    assert sorted(boot_ks) == ["nirLumTilledLeaveOutCI", "nirLumTilledRiceCI"], (
         "sec. criteria says only the two comparisons that pool all folds are "
         f"bootstrapped, but {sorted(boot_ks)} rest on {A.MIN_BOOT_UNITS} or "
         "more sequences")
@@ -866,13 +939,29 @@ def test_every_interval_over_few_sequences_is_a_t_interval():
         f"the t intervals rest on up to {max(t_ks)} sequences and the "
         f"bootstrap ones on {sorted(boot_ks.values())}, against the threshold "
         f"{A.MIN_BOOT_UNITS}")
-    for macro, name in (("eTwoPooledCI", "eTwoSequences"),
-                        ("gThreePooledCI", "gThreeSequences")):
+    for macro, name in (("nirLumTilledLeaveOutCI", "nLeaveOutSequences"),
+                        ("nirLumTilledRiceCI", "nRiceSequences")):
         n = re.search(r"\\newcommand\{\\" + name + r"\}\{(\d+)\}",
                       params).group(1)
         assert int(n) == boot_ks[macro], (
             f"sec. criteria prints \\{name} as {n} sequences, but "
             f"\\{macro} resamples {boot_ks[macro]}")
+    # 'some of them dry-field sequences whose frames show a tilled paddy' and
+    # 'the 72 rice-paddy sequences': the sequences that the leave-one-site-out
+    # pool holds beyond the rice-paddy pool are dry-field sequences, and the
+    # rice-paddy pool holds rice-paddy sequences only.
+    seqs = {}
+    for name, fp in (("loso", _folds.E_FOLD_PROTO), ("rice", _folds.G_FOLD_PROTO)):
+        keys, _d = _pooled_over_folds(runs, fp.values(), "NIR", "LUM",
+                                      "paddy_after_driving", px)
+        seqs[name] = {(k[0], k[1]) for k in keys}
+    extra = seqs["loso"] - seqs["rice"]
+    assert (extra and {e for e, _q in extra} == {"Field"}
+            and {e for e, _q in seqs["rice"]} == {"Paddy"}
+            and seqs["rice"] <= seqs["loso"]), (
+        "sec. criteria says the leave-one-site-out pool adds dry-field sequences "
+        "to the rice-paddy sequences of the rice-paddy pool, but the extra "
+        f"sequences are {sorted(extra)[:5]}")
     m = re.search(r"\\newcommand\{\\maxTSequences\}\{(\d+)\}", params)
     assert m and int(m.group(1)) == max(t_ks), (
         f"sec. criteria prints {m.group(1) if m else 'no count'} as the most "
@@ -881,22 +970,18 @@ def test_every_interval_over_few_sequences_is_a_t_interval():
 
 
 def test_fusion_gain_is_confined_to_one_site():
-    """Manuscript sec. redundancy: 'Fusion's gain over RGB on the tilled
-    paddy surface, found under the site-blocked protocol, does not hold at every
-    held-out site ... the margin fusion $-$ RGB
-    changes sign across the sites and is negative at site A, so fusion cannot
-    be better than RGB there.' The paddy-restricted folds change
-    sign and their site-level test does not separate them from zero; 'On the
-    leave-one-site-out cross-validation, however, the margins at site B and at
-    site C, whose fold is the site-blocked protocol, have intervals excluding
-    zero', and Table~\ref{tab:folds} prints the
-    margin at site A of that cross-validation as negative. Contribution 1
-    prints the site-blocked gain beside the fold at the site with most dry-field frames's reversal.
+    """Manuscript sec. redundancy: 'fusion is better than RGB on the tilled
+    paddy surface' at site C, and 'Fusion's margin over RGB on the tilled surface is negative at site A on
+    both cross-validations (Table~\\ref{tab:folds}), although the margin and
+    its interval lie above zero at site B on the leave-one-site-out
+    cross-validation (Table~\\ref{tab:margins}).' On both cross-validations
+    the folds change sign and the site-level test does not separate them from
+    zero.
 
     This is the claim that replaced a positive contribution, so both halves
     are asserted: the single-site gain is real (dropping it would hide what
-    the blocked protocol reports) and it does not replicate (asserting only
-    the gain would republish the error)."""
+    site C reports) and it does not replicate (asserting only the gain would
+    republish the error)."""
     A = importlib.import_module("analyze")
     runs, px = A.load_runs(), A.gt_px()
     cls = "paddy_after_driving"
@@ -934,26 +1019,35 @@ def test_fusion_gain_is_confined_to_one_site():
     # says there are two
     above = {f: s for f, s in unres.items() if f not in below}
     assert len(above) == 2 and all(s["lo"] > 0 for s in above.values()), (
-        "manuscript sec. redundancy: 'the margins on both folds above the "
-        "floor have intervals excluding zero', but those folds give "
+        "manuscript sec. redundancy: 'fusion scores higher than RGB at site B "
+        "and at site C', the folds above the floor, but those folds give "
         f"{ {f: (round(s['lo'], 4), round(s['hi'], 4)) for f, s in above.items()} }")
     assert unres["site000"]["mean"] < 0, (
         "manuscript tab:folds prints fusion's margin as negative on the "
         "leave-one-site-out fold at the site with most dry-field frames, but it is "
         f"{unres['site000']['mean']:+.3f}")
+    # 'On both cross-validations, the three sites' mean margins of fusion
+    # over RGB on the tilled surface change sign, so the site-level test does
+    # not reject a mean of zero on either'
+    loso = {f: v["mean"] for f, v in unres.items()}
+    assert min(loso.values()) < 0 < max(loso.values()), (
+        "sec. redundancy says the leave-one-site-out means of fusion over RGB "
+        f"on the tilled surface change sign, but they are {loso}")
+    s_e = _folds.site_level_stats(loso.values())
+    assert (s_e["p"] > config.ALPHA
+            and _macro_value("fusionRgbTilledLeaveOutP") == f"{s_e['p']:.2f}"), (
+        "sec. redundancy prints the leave-one-site-out site-level p of fusion "
+        f"over RGB as {_macro_value('fusionRgbTilledLeaveOutP')}, and the "
+        f"folds give p = {s_e['p']:.3f}")
 
 
 def test_fusion_loses_to_color_on_the_dry_field_class():
-    """Manuscript sec. redundancy: 'RGB is better than fusion on the field
-    furrow', with an interval excluding zero, and 'RGB's advantage over
-    fusion on the field furrow does not hold at every held-out site either: on
-    the leave-one-site-out cross-validation, the margin RGB - fusion is -0.010
-    at site B. That cross-validation does not score the furrow at site A,
-    where only 10 frames, all from rice-paddy sequences, carry it, fewer than
-    the 50 that make a class evaluable.'
-    The set of folds scoring
-    the furrow is derived from the
-    runs, so a fold that starts scoring it fails the second sentence."""
+    """Manuscript sec. redundancy: 'RGB is better than fusion on the dry-field furrow', with an interval excluding zero, and 'RGB's margin over fusion on the furrow is -0.010 at site B on the
+    leave-one-site-out cross-validation. The furrow is not scored at site A, the third site, because none of its
+    dry-field frames carries the furrow and only 10 frames of its rice-paddy
+    sequences do.' The
+    set of folds scoring the furrow is derived from the runs, so a fold that
+    starts scoring it fails the second sentence."""
     A = importlib.import_module("analyze")
     fam = A.paired_family(A.load_runs(), "blocked", "RGBNIR", "RGB", "isec",
                           A.gt_px())
@@ -968,7 +1062,7 @@ def test_fusion_loses_to_color_on_the_dry_field_class():
     scored = {f: v for f, v in scored.items() if v is not None}
     sites = {x["site_id"]: x for x in json.load(open(config.SPLITS_JSON))["sites"]}
     furrow0 = sites["site000"]["class_frames"].get("field_furrow", 0)
-    printed = re.search(r"\\newcommand\{\\nFurrowFramesSiteZero\}\{(\d+)\}",
+    printed = re.search(r"\\newcommand\{\\nFurrowFramesSiteA\}\{(\d+)\}",
                         _read_params())
     assert printed and int(printed.group(1)) == furrow0 < config.MIN_VAL_FRAMES, (
         "manuscript sec. redundancy states only "
@@ -992,14 +1086,15 @@ def test_fusion_loses_to_color_on_the_dry_field_class():
 
 
 def test_pooled_positives_do_not_replicate_between_sites():
-    """Manuscript sec. methods: 'The interval of a test that pools the folds
-    weights each fold by its frame count, so one site with many frames can
-    alone produce an interval that excludes zero.' One site carries a pooled pass at any n, so the cross-validation of the
-    held-out site is the test a pooled value cannot stand in for.
+    """Manuscript sec. redundancy: 'Pooled over the folds, NIR is better than the luminance control on the
+    tilled surface on both cross-validations ..., but the site-level test
+    does not detect NIR's margin on either'. One site carries a
+    pooled pass at any n, so the site-level test is the one a pooled value
+    cannot stand in for.
 
     Asserted on both cross-validations at once - E2 (leave-one-site-out) and G3
-    (Paddy-restricted) - because the manuscript's protocol prescription
-    ('a leave-one-site-out cross-validation with a site-level test') rests on the
+    (rice paddy) - because the Discussion's prescription ('a
+    leave-one-site-out cross-validation with a site-level test') rests on the
     pair, not on either alone."""
     runs = _folds.load_runs("mit_b0")
     px = _folds.A.gt_px()
@@ -1024,32 +1119,27 @@ def test_pooled_positives_do_not_replicate_between_sites():
 
 
 def test_the_two_cameras_are_not_co_registered():
-    """Manuscript sec. materials: 'Phase correlation, an estimator of the
-    offset that best aligns two images, finds a median offset of 7 px
-    vertically and 6 px horizontally over 1200 frames drawn at random from the
-    sampled frames, 400 frames from each of the three recording sites defined
-    below.' The
-    estimator runs on gradient magnitudes of the frames of the two cameras,
-    and 'The same estimator returns a median offset of 1 px vertically and
-    0 px horizontally when each RGB frame is paired with an NIR frame from
-    another sequence, so the offset is not an artifact of the estimator.' The four
-    medians are the \\camShiftPx, \\camShiftXPx, \\camShiftControlPx and
-    \\camShiftControlXPx macros.
+    """Manuscript sec. materials: 'We estimate the offset that best aligns
+    the two images by phase correlation on their gradient magnitudes. Over
+    1200 frames drawn at random from the sampled frames, the median offset is
+    7 px vertically and 6 px horizontally' and 'Applied to pairs of an RGB
+    and an NIR image from different sequences, which have no alignment to
+    find, phase correlation finds medians of only 1 px and 0 px'. The four
+    medians are the \\camShiftPx,
+    \\camShiftXPx, \\camShiftControlPx and \\camShiftControlXPx macros.
 
     Phase correlation returns an argmax on any two images, so the offset
     measures the cameras only where it exceeds the estimator's own null.
     Asserted against that null rather than against a threshold anyone chose,
     on both of the statistics the null returns: the matched displacement is
-    the larger, and the matched correlation peak the stronger. If a future
-    re-extraction registers the two streams, this fails and the limitation
-    the manuscript states is obsolete rather than merely unmentioned."""
+    the larger, and the matched correlation peak the stronger."""
     reg = _load("camera_offset.json")
     ctrl = reg["cross_pair"]
     per_site = importlib.import_module("phases.camera_offset").REG_SAMPLE_PER_SITE
     n_sites = len(_splits()["sites"])
     assert reg["n_frames"] == n_sites * per_site, (
         "manuscript sec. materials states the offset is a median over "
-        f"{per_site} sampled frames from each of the {n_sites} sites, but it "
+        f"frames drawn from the {n_sites} sites, {per_site} from each, but it "
         f"is taken over {reg['n_frames']} frames, so some site supplied fewer")
     assert abs(reg["median_dy"]) >= 2, (
         "manuscript sec. materials reports a vertical camera offset of about "
@@ -1077,12 +1167,10 @@ def test_the_two_cameras_are_not_co_registered():
 
 
 def test_the_repeat_models_run_only_under_the_site_blocked_protocol_and_the_sequence_level_split():
-    """Manuscript sec. methods: 'The two repeats run only under the
-    sequence-level split and under the site-blocked protocol, which holds one
-    site out of training.' The repeat set is
-    every model config.py registers other than the primary one, the model
-    whose run tag is empty, so a third repeat added to the registry is
-    checked too."""
+    """Manuscript sec. protocols: 'The repeat models run only under the dataset's split and the
+    leave-one-site-out fold that holds out site C.'. The repeat set is every model
+    config.py registers other than the primary one, the model whose run tag is
+    empty, so a third repeat added to the registry is checked too."""
     repeats = [k for k, tag in config.MODEL_TAG.items() if tag]
     assert len(repeats) == 2, (
         f"sec. methods names two repeat models, but config.py registers "
@@ -1096,11 +1184,10 @@ def test_the_repeat_models_run_only_under_the_site_blocked_protocol_and_the_sequ
 
 
 def test_every_network_is_evaluated_once_at_the_end_of_its_training():
-    """Manuscript sec. methods: 'Every network is evaluated once, at the end
-    of its training, so the validation frames, the frames that a split holds
-    out, serve only as test frames.' Read off src/train.py: the one call that
-    scores the validation loader sits after the epoch loop, not inside it,
-    so no epoch or checkpoint is chosen by its validation score."""
+    """Manuscript sec. methods: every network 'is evaluated once, at the end
+    of its training'. Read off src/train.py: the one call that scores the
+    validation loader sits after the epoch loop, not inside it, so no epoch or
+    checkpoint is chosen by its validation score."""
     tree = ast.parse(open(os.path.join(ROOT, "src", "train.py")).read())
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
              and isinstance(n.func, ast.Name) and n.func.id == "evaluate"]
@@ -1119,19 +1206,15 @@ def test_every_network_is_evaluated_once_at_the_end_of_its_training():
 
 
 def test_the_site_level_tests_report_their_own_resolution():
-    """Manuscript sec. methods defines the site-level test as 'a one-sample t test
-    on the fold means of the margin';
-    sec. methods: 'Every site-level test runs on the fold means of
-    all three sites. With two degrees of freedom, its 0.05 critical value is
-    4.30 standard errors'
+    """Manuscript sec. criteria defines the site-level test as 'a one-sample
+    $t$ test on the three held-out ... mean margins'.
 
-    Every site-level p the paper prints misses that level, which is the shape
-    that reads as a demonstrated null. None is one. At this fold count the
-    critical value alone is more than double the large-sample 1.96, so a test
-    that cannot detect an effect is what the cross-validation buys before any effect
-    enters it, and sec. methods says so rather than letting the reader supply
-    the inference. The reservation the section takes rests on the sign reversal
-    between folds, which the tests do not carry.
+    Every site-level p the paper prints misses the 0.05 level, which is the
+    shape that reads as a demonstrated null. None is one: at three sites the
+    critical value is more than double the large-sample 1.96. The paper does
+    not print that value, because no claim rests on it; sec. results states
+    each site-level p beside the pooled comparison it qualifies, and the
+    reservation it takes rests on the sign of the sites' means.
 
     The interval behind each of those p values is computed and deliberately
     NOT printed: on 2 df its endpoints are set by the fold count rather than
@@ -1153,35 +1236,12 @@ def test_the_site_level_tests_report_their_own_resolution():
         "sec. methods says a site-level interval is taken over the dataset's "
         f"sites, but the test runs on {st['k']} of "
         f"{len(_splits()['sites'])}")
-    m = re.search(r"\\newcommand\{\\siteLevelTCrit\}\{([\d.]+)\}",
-                  _read_params())
-    assert m and abs(float(m.group(1)) - st["tcrit"]) < 5e-3, (
-        f"sec. methods prints the site-level critical value as "
-        f"{m.group(1) if m else 'no macro'} standard errors, but at "
-        f"{st['k']} folds the t quantile is {st['tcrit']:.4f}")
     half = (st["hi"] - st["lo"]) / 2
     se = float(np.std(st["folds"], ddof=1) / np.sqrt(st["k"]))
     assert abs(half - st["tcrit"] * se) < 1e-9, (
-        "sec. methods states the critical value reaches that many standard "
-        f"errors, but the interval half-width it sets is {half:.6f} against "
+        "the site-level interval is the one-sample t interval at k-1 degrees "
+        f"of freedom, but its half-width is {half:.6f} against "
         f"{st['tcrit'] * se:.6f}")
-    m = re.search(r"\\newcommand\{\\siteLevelDof\}\{(\w+)\\xspace\}",
-                  _read_params())
-    words = ast.literal_eval(re.search(
-        r"^WORDS = (\{.*\})$",
-        open(os.path.join(ROOT, "src", "build_parameters.py")).read(),
-        re.M).group(1))
-    assert m and m.group(1) == words[st["k"] - 1], (
-        f"sec. methods prints {m.group(1) if m else 'no macro'} degrees of "
-        f"freedom for the site-level test, but {st['k']} folds give "
-        f"{st['k'] - 1}")
-    assert r"\siteLevelDof" in _read_tex(), (
-        "sec. methods states the site-level test's degrees of freedom, but "
-        "the macro carrying that count is no longer printed")
-    assert r"\siteLevelTCrit" in _read_tex(), (
-        "sec. methods states how coarse a site-level reading is; the macro "
-        "carrying that number is no longer printed, so site-level p values "
-        "that all miss the level reach the reader with nothing saying why")
     gen = open(os.path.join(ROOT, "src", "build_parameters.py")).read()
     site_vars = set(re.findall(r"(\w+)\s*=\s*[\w.]*site_level_stats\(", gen))
     assert site_vars, ("build_parameters.py no longer builds any site-level "
@@ -1209,9 +1269,9 @@ def test_manuscript_prints_both_halves_of_every_pooled_positive():
     macros, so what is checked is that the manuscript PRINTS them - a number
     computed and macro'd but never reported is not reported."""
     tex = _read_tex()
-    for pooled, site in ((r"\eTwoPooledCI", r"\eTwoSiteLevelP"),
-                         (r"\gThreePooledCI", r"\gThreeSiteLevelP"),
-                         (r"\fusionColorBlockedCI", r"\fusionColorSiteP")):
+    for pooled, site in ((r"\nirLumTilledLeaveOutCI", r"\nirLumTilledLeaveOutP"),
+                         (r"\nirLumTilledRiceCI", r"\nirLumTilledRiceP"),
+                         (r"\fusionRgbTilledSiteCCI", r"\fusionRgbTilledRiceP")):
         assert pooled in tex, (
             f"manuscript sec. results must report {pooled}, the pooled "
             "outcome of a protocol criterion, but it is absent")
@@ -1222,10 +1282,11 @@ def test_manuscript_prints_both_halves_of_every_pooled_positive():
 
 
 def test_a_frame_level_interval_understates_the_one_over_sequences():
-    """Manuscript sec. redundancy: 'Treating recording sequences rather than
-    frames as independent decides the primary model's outcome: a $t$ interval
-    over frames, ... excludes zero, so an interval over frames would report an
-    advantage of NIR that the interval over sequences does not.' The same blocked NIR-minus-luminance deltas give a frame-level t
+    """Manuscript sec. redundancy: 'On the tilled surface, the comparison
+    detects no difference on any of the three models ..., although a $t$
+    interval that treated frames rather than sequences as independent, ...,
+    would exclude zero on the primary model.' The same site-C
+    NIR-minus-luminance deltas give a frame-level t
     interval excluding zero and an interval over sequences spanning it. The
     assertion is that the two disagree in exactly that direction - a
     frame-level interval that did NOT understate would mean the paper's case
@@ -1273,33 +1334,10 @@ def _fold_mean(runs, proto, cls):
     return float(np.mean(vals))
 
 
-def test_any_floor_in_the_printed_range_gives_the_same_outcomes():
-    """Manuscript sec. results: 'Any floor value above 0.248 and up to 0.392
-    therefore flags the same folds', the folds that 'The floor flags only the
-    fold that holds out site A on the leave-one-site-out cross-validation'
-    names. The endpoints are the
-    failing leave-one-site-out fold and the lowest paddy-restricted fold; every
-    other fold of either cross-validation must sit at or above the upper endpoint."""
-    b0 = _folds.load_runs("mit_b0")
-    unres = {f: _fold_mean(b0, p, "common_road")
-             for f, p in _folds.E_FOLD_PROTO.items()}
-    paddy = {f: _fold_mean(b0, p, "paddy_after_driving")
-             for f, p in _folds.G_FOLD_PROTO.items()}
-    low, high = unres["site000"], min(paddy.values())
-    assert low < config.PLOSO_CONTROL_FLOOR <= high, (
-        f"the committed floor {config.PLOSO_CONTROL_FLOOR} no longer lies in "
-        f"the printed range ({low:.3f}, {high:.3f}]")
-    others = [v for f, v in unres.items() if f != "site000"]
-    assert min(others) >= high, (
-        "manuscript sec. results claims any floor up to the lowest "
-        "paddy-restricted fold keeps every other leave-one-site-out fold above it, "
-        f"but the leave-one-site-out folds are {unres}")
-
-
 def test_the_pooled_margins_rest_on_the_field_heavy_fold():
-    """Manuscript sec. results: 'On both cross-validations, site A has the
-    largest fold mean', and Table~\ref{tab:folds} prints the
-    leave-one-site-out cross-validation's three fold means, all positive."""
+    """Manuscript sec. redundancy: 'On both, site A has the largest mean
+    margin', and Table~\\ref{tab:folds} prints the leave-one-site-out
+    cross-validation's three site means, all positive."""
     b0 = _folds.load_runs("mit_b0")
     px = _folds.A.gt_px()
     for name, proto_map in (("leave-one-site-out", _folds.E_FOLD_PROTO),
@@ -1317,17 +1355,19 @@ def test_the_pooled_margins_rest_on_the_field_heavy_fold():
 
 def test_a_frame_enters_the_intersection_comparisons_when_both_annotations_mark_the_class():
     """Manuscript sec. protocols: the inflation's F_c is the set of frames
-    'whose two annotations both mark c'; sec. criteria: 'For the intersection
-    ground truth, both annotations must mark the class somewhere in the frame.
-    A frame whose two annotations mark the class on no common pixel therefore
-    gives both configurations an IoU of zero (an empty union counts as zero)
-    and adds a zero difference to the margin.'
+    'Let $F_c$ be the set of those frames whose two annotations both mark
+    class $c$'; sec. criteria: 'A comparison of two configurations on one class takes the difference of
+    their IoUs, each averaged over the seeds, on each frame whose ground
+    truth marks that class. Its margin is the mean of those differences. On the intersection ground
+    truth, the frames whose ground truth marks the class are the frames that
+    both annotations mark.'
 
     The inclusion rule is read off the per-frame pixel counts of the two
-    annotations. The zero is read off the runs: on a frame where no seed's
-    intersection counts a pixel of the class that the prediction shares, the
-    seed-mean per-frame IoU the comparisons use is exactly zero, including
-    the frames whose union is empty."""
+    annotations. src/analyze.py then scores a frame whose two annotations mark
+    the class on no common pixel as an IoU of zero, read off the runs: on a
+    frame where no seed's intersection counts a pixel of the class that the
+    prediction shares, the seed-mean per-frame IoU the comparisons use is
+    exactly zero, including the frames whose union is empty."""
     A = _folds.A
     px = A.gt_px()
     ci = config.CLASSES.index("paddy_edge")
@@ -1356,10 +1396,12 @@ def test_a_frame_enters_the_intersection_comparisons_when_both_annotations_mark_
 
 
 def test_every_configuration_draws_frames_with_the_same_weights():
-    """Manuscript sec. methods: 'The sampling weights are computed from the
-    union of the RGB and NIR annotations, so all configurations share one set
-    of weights.' Each run records its
-    sampler; runs that share a partition must record one sampler."""
+    """Manuscript sec. methods: 'Every network uses the training settings of
+    Table~\\ref{tab:config}, in which every configuration trained under one
+    split draws its frames with the same rare-class sampling weights',
+    which tab:config computes from the union of the two annotations. Each run
+    records its sampler; runs that share a partition must record one
+    sampler."""
     groups = defaultdict(set)
     for m in _study_runs():
         groups[(m["protocol"], m["train_env"])].add(
@@ -1382,13 +1424,12 @@ def test_every_run_used_the_same_training_settings():
 
 
 def test_any_merge_radius_in_the_printed_range_returns_the_same_super_sites():
-    """Manuscript sec. materials: 'The three sites therefore do not depend on the
-    merge radius: any radius from ... up to, but not including, ... returns
-    them.' Single linkage
-    returns three clusters exactly for radii between the merge height of the
-    fourth cluster and the separation of the third, so the claim holds when
-    the committed radius lies in that range and the probe's cut reproduces
-    the committed sites (test_env_stratified_resplit_is_infeasible)."""
+    """Manuscript sec. materials: 'Any merge radius from ... up to, but not including, ... returns the
+    same sites.'. Single linkage returns three
+    clusters exactly for radii between the merge height of the fourth cluster
+    and the separation of the third, so the claim holds when the committed
+    radius lies in that range and the probe's cut reproduces the committed
+    sites (test_no_fourth_site_separates_the_sequences)."""
     g = _geometry_probe()
     low = g["separation_first_past_committed_k_m"]
     high = g["separation_at_committed_k_m"]
@@ -1399,8 +1440,10 @@ def test_any_merge_radius_in_the_printed_range_returns_the_same_super_sites():
 
 def test_field_environment_is_concentrated_in_one_site():
     """Manuscript sec. materials and sec. protocols: site000 holds ~66% of all
-    Field frames, so the site000 LOSO fold trains on a minority of them, the
-    reason the paddy-restricted cross-validation exists."""
+    Field frames, so the site000 LOSO fold 'trains on the minority of the dry-field frames
+    that sites B and C hold, and a low IoU at site A on this fold may
+    reflect that scarcity as well as the new site', the reason the
+    paddy-restricted cross-validation exists."""
     g = _geometry_probe()
     share = g["env_composition"]["Field"]["site000"]["share_of_env"]
     assert share > 0.60, (
@@ -1414,12 +1457,13 @@ def test_field_environment_is_concentrated_in_one_site():
 
 
 def test_no_split_tests_a_gain_on_the_furrow_or_the_ridge_at_more_than_one_site_within_one_environment():
-    """Manuscript sec. discussion: 'No split tests whether a gain on the
-    furrow or the ridge holds at more than one site within one environment,
-    because the splits confined to rice paddy score the two classes on frames
-    of site C alone and no split is confined to dry fields'; sec. materials:
-    'An environment labels a whole recording sequence, so a frame of a
-    dry-field sequence can show a rice paddy.' The splits are every protocol
+    """Manuscript sec. discussion: 'For the dry-field furrow and ridge, the only held-out test within one
+    environment is the rice-paddy cross-validation at site C, the one site
+    whose rice-paddy frames carry the two classes in at least 50 frames. No
+    split is confined to dry fields, so the tests of the two classes at site
+    B mix the two environments'; sec. materials: 'Each
+    recording sequence carries one environment label, which its frames
+    take.' The splits are every protocol
     of the run configuration, each read from its own runs: a split is within
     one environment when its validation frames are of one environment, and
     the sites at which it scores a class are the sites of the validation
@@ -1471,39 +1515,28 @@ def test_no_split_tests_a_gain_on_the_furrow_or_the_ridge_at_more_than_one_site_
         f"training environments are {sorted(train_envs)}, the splits evaluated "
         f"on dry fields alone are {dry}, and the one environment to which "
         f"train.py restricts a split is {config.PLOSO_ENV}")
-    paddy = [config.CLASSES.index(c) for c in
-             ("paddy_edge", "paddy_before_driving", "paddy_after_driving")]
-    shown = [r for r in config.load_index() if r["env"] == "Field"
-             and any(r["px_rgb"][c] > 0 and r["px_nir"][c] > 0 for c in paddy)]
-    assert shown, ("sec. materials says a frame of a dry-field sequence can "
-                   "show a rice paddy, but no dry-field frame carries a paddy "
-                   "class on both annotations")
 
 
-def test_the_dry_field_frames_of_site_a_carry_no_dry_field_target_class():
-    """Manuscript sec. materials: 'site A holds 66.4% of the sampled dry-field
-    frames, so a network trained without site A sees a minority of them.
-    Those dry-field frames of site A carry neither the furrow nor the ridge,
-    however, so training without site A removes no dry-field frame of either
-    class.' Site A is read as the site with most dry-field frames, as the
-    sentence names it, and the claim is checked on both annotations of every
-    sampled frame of that site's dry-field sequences."""
+def test_the_dry_field_frames_of_site_a_carry_no_furrow():
+    """Manuscript sec. protocols: 'Site A holds 66.4% of the sampled dry-field
+    frames'; sec. redundancy: 'none of its dry-field frames carries the furrow'. Site A is read as the site with most dry-field frames, and the
+    claim is checked on both annotations of every sampled frame of that
+    site's dry-field sequences."""
     comp = _geometry_probe()["env_composition"]
     heavy = max(comp["Field"], key=lambda st: comp["Field"][st]["share_of_env"])
     k2s = _index_key2site()
     field = [r for r in config.load_index() if r["env"] == "Field"
              and k2s[f"{r['osplit']}/{r['env']}/{r['seq']}"] == heavy]
     assert field, f"the index holds no dry-field frame of {heavy}"
-    for cls in ("field_furrow", "field_levee"):
-        ci = config.CLASSES.index(cls)
-        carrying = [r for r in field if r["px_rgb"][ci] > 0 or r["px_nir"][ci] > 0]
-        assert not carrying, (
-            "sec. materials says no sampled dry-field frame of site A carries "
-            f"the furrow or the ridge, but {len(carrying)} of {heavy}'s "
-            f"{len(field)} dry-field frames carry {cls}")
+    ci = config.CLASSES.index("field_furrow")
+    carrying = [r for r in field if r["px_rgb"][ci] > 0 or r["px_nir"][ci] > 0]
+    assert not carrying, (
+        "sec. redundancy says no sampled dry-field frame of site A carries "
+        f"the furrow, but {len(carrying)} of {heavy}'s {len(field)} dry-field "
+        "frames carry it")
 
 
-def test_env_stratified_resplit_is_infeasible():
+def test_no_fourth_site_separates_the_sequences():
     """Ledger 2026-07-24: separation falls off a cliff past the committed
     site count, so no re-clustering buys env balance without reintroducing
     leakage. Guards the decision to restrict (phase G) rather than re-split."""
@@ -1531,11 +1564,11 @@ def test_env_stratified_resplit_is_infeasible():
             "config ledger 2026-07-24 claims cutting past the committed "
             "sites makes the big cluster MORE Field-heavy (0.45 -> 0.48), "
             f"but at K={s['k']} its Field share is {big['field_share']:.2f}")
-    # sec. materials: 'Within each site, chains of links no longer than 0.5 m
-    # connect all of the site's sequences, so only a radius below 0.5 m would
-    # split a site.' and 'A radius below 0.5 m cannot spread the dry-field
-    # frames more evenly, because every cluster it splits off holds no
-    # dry-field frame.'
+    # sec. materials: 'Any radius from 0.5 m up to, but not including, 761 m
+    # returns the same sites, because chains of links no longer than 0.5 m
+    # connect each site's sequences' and 'Site A's share of the dry-field
+    # frames stays the same for every radius below 761 m, because a radius
+    # below 0.5 m splits off only clusters without dry-field frames.'
     # The largest cluster is site A only if its frames are that site's, and a
     # cluster split off is one beyond the committed count, the clusters being
     # listed largest first.
@@ -1564,7 +1597,7 @@ def test_env_stratified_resplit_is_infeasible():
             f"it falls to {s['clusters'][0]['field_share']:.3f}")
 
 
-def test_the_committed_control_criterion_failed_on_site000():
+def test_the_road_scores_low_at_site_a_without_its_frames():
     """Gate E3 fell as FAIL on fold site000 and the ledger records it as such.
     This asserts the failure, not a pass: if a later change made the control
     clear 0.30, the ledger text and the phase-G rationale are both wrong."""
@@ -1644,7 +1677,7 @@ def test_pofficial_matches_ploso_in_environment_and_differs_in_split():
 
 
 def test_g2b_fixed_sets_are_seen_by_pofficial_and_unseen_by_ploso():
-    """Gate G2b (config ledger 2026-07-24b) lifts leakage_isolation.py's
+    """Gate G2b (config ledger 2026-07-24b) lifts the frame-fixed seen-vs-unseen
     frame-fixed design
     into the Paddy regime. Its validity rests on three properties of S_N, all
     checkable before any run: neither condition trained on S_N (so it is not
@@ -1669,7 +1702,7 @@ def test_g2b_fixed_sets_are_seen_by_pofficial_and_unseen_by_ploso():
             "trains on some of its own fixed set")
         assert not (po_tr & {id(r) for r in S}), (
             f"G2b requires S_N to be untrained by BOTH conditions "
-            f"(leakage_isolation.py "
+            f"(the frame-fixed "
             f"design), but pofficial trains on part of fold {fold}'s S_N")
         assert not any(site(r) == fold for r in env if id(r) in ploso_tr), (
             f"ploso{fold[len('site'):]} must never see any {fold} frame")
@@ -1689,10 +1722,17 @@ def test_pofficial_is_committed_and_matrix_is_intact():
     2026-07-24b amendment against a silent edit: 20 pofficial runs, mit_b0,
     the committed seed set, and no protocol outside the ledger."""
     matrix = config.RUN_MATRIX
-    assert len(matrix) == 240 and len({r["run_id"] for r in matrix}) == 240, (
-        f"config ledger 2026-09-22 leaves a 240-run matrix (260 committed "
-        f"through phase H, less phase B's 20), found {len(matrix)} rows / "
-        f"{len({r['run_id'] for r in matrix})} ids")
+    assert len(matrix) == 245 and len({r["run_id"] for r in matrix}) == 245, (
+        f"config ledger 2026-11-16 leaves a 245-run matrix (260 committed "
+        f"through phase H, less phase B's 20, plus phase I's 5), found "
+        f"{len(matrix)} rows / {len({r['run_id'] for r in matrix})} ids")
+    diag = [r for r in matrix if r["phase"] == "I"]
+    assert ({r["arm"] for r in diag} == {config.DIAG_ARM}
+            and {r["seed"] for r in diag} == set(config.SEEDS)
+            and {r["protocol"] for r in diag} == {"official"}
+            and all(r["backbone"] == "mit_b0" for r in diag)), (
+        "config ledger 2026-11-16 commits phase I as the diagnostic arm on "
+        "the whole seed set under the official split, mit_b0")
     po = [r for r in matrix if r["protocol"] == "pofficial"]
     assert len(po) == 20, (
         f"config ledger 2026-07-24b commits 20 pofficial runs, found {len(po)}")
@@ -1757,13 +1797,13 @@ def _pooled_over_folds(runs, protos, arm_x, arm_y, cls, px):
 
 
 def test_phase_e2_passes_pooled_and_site_a_contributes_most_of_it():
-    """Manuscript sec. redundancy: pooled over the leave-one-site-out cross-validation's
-    folds, near-infrared is better than the luminance control on the tilled
-    paddy surface, and 'On both cross-validations, site A has the largest fold
-    mean (Table~\\ref{tab:folds}) and the most frames that carry the tilled
-    paddy surface, so it contributes most of the pooled margin.' Both halves are
-    asserted: dropping the second would overstate the pooled result, and
-    dropping the first would re-scope the criterion after the fact. The fold
+    """Manuscript sec. redundancy: pooled over the leave-one-site-out
+    cross-validation's folds, near-infrared is better than the luminance
+    control on the tilled paddy surface, and 'On both, site A has the largest
+    mean margin (Table~\\ref{tab:folds}) and the most frames that carry the
+    tilled surface, so it contributes most of the pooled margin.' Both halves
+    are asserted: dropping the second would overstate the pooled result, and
+    dropping the first would re-scope the criterion after the fact. The site
     means, frame counts and shares are read off the frames that each pooled
     test concatenates, on both cross-validations."""
     runs = _folds.load_runs("mit_b0")
@@ -1808,11 +1848,12 @@ def test_phase_e2_passes_pooled_and_site_a_contributes_most_of_it():
 
 
 def test_no_site_holds_half_of_the_rice_paddy_frames():
-    """Manuscript sec. protocols: 'it confines training and evaluation to rice
-    paddy, of which no site holds half of the sampled frames, so holding out a
-    site tests generalization to a new site within one environment.' Read off
-    the index and the split's own site table, so a re-split that concentrates
-    rice paddy in one site fails here."""
+    """Manuscript sec. protocols: 'The rice-paddy cross-validation confines training and evaluation to
+    rice-paddy frames. No site holds half of those frames, so each fold holds out a new site
+    within one environment and still trains on most of that environment's
+    frames.' Read off the index and the split's own
+    site table, so a re-split that concentrates rice paddy in one site fails
+    here."""
     k2s = _index_key2site()
     per_site = defaultdict(int)
     paddy = [r for r in config.load_index() if r["env"] == config.PLOSO_ENV]
@@ -1871,10 +1912,9 @@ def test_phase_f1_inflation_of_nir_is_not_detected_on_mit_b2():
     """Gate F1 (config.py), reported as it fell. The official-vs-blocked
     paddy_edge inflation of NIR was asked to reproduce on the mit_b2 backbone
     (~7x the mit_b0 encoder), and its interval over the four sequences of
-    site C spans zero. Manuscript sec. concentration: 'On both repeat models,
-    which hold out site C alone, the inflation of NIR has an interval spanning
-    zero (Table~\\ref{tab:robustness}(a)), so neither repeat model shows the
-    leakage of NIR.'"""
+    site C spans zero. Manuscript sec. concentration: 'At site C, NIR's
+    paddy-edge inflation is positive but not detected on any of the three
+    models, because its interval spans zero'."""
     _repeat_inflation_is_not_detected("mit_b2", "segformer", "F1")
 
 
@@ -1942,7 +1982,7 @@ def test_phase_h2_does_not_reproduce_off_segformer():
         "body: the sentence states the verdict and the float carries it")
 
 
-def test_phase_g1_control_holds_on_all_paddy_folds():
+def test_the_tilled_surface_clears_the_control_on_every_rice_paddy_fold():
     """Gate G1 (config.py). The control E3 failed - the fold-mean
     intersection IoU floor - must clear on all three Paddy-restricted folds.
     G1 passing licenses phase G's cross-site tests. It does not make the E3
@@ -1962,17 +2002,20 @@ def test_phase_g1_control_holds_on_all_paddy_folds():
 
 
 def test_site_a_fails_on_the_road_with_the_environment_held_fixed():
-    """Manuscript sec. concentration: 'a floor on the farm access road
-    instead of the tilled paddy surface would flag the fold at site A, where
-    the averaged pooled IoU of the road is 0.056. On both folds at site A, every
-    configuration's pooled IoU on the road is below the floor, whereas the
-    averaged pooled IoU of the tilled paddy surface is above it, 0.362 on the
-    leave-one-site-out fold.' Each value is the quantity floor_gate reads
-    (analyze_folds.py), a pooled IoU per configuration and seed; 'every
-    configuration' is read per configuration as the seed mean, and the tilled
-    surface and 'the fold at site A' on the average. The road is the class whose
-    failure is specific to site A: the paddy edge and the untilled surface are
-    below the floor on every fold, so the sentence names neither."""
+    """Manuscript sec. concentration: 'Averaged over the four input configurations, their pooled IoU on the
+    road at site
+    A is 0.248 on the leave-one-site-out fold and 0.056 on the rice-paddy
+    fold, against 0.806 and 0.801 at sites B and C on the leave-one-site-out
+    cross-validation. On the tilled surface, averaged in the same way, they
+    score 0.362 at site A on the leave-one-site-out fold and 0.392 on the
+    rice-paddy fold, the lowest of the three rice-paddy folds. Site A thus
+    differs from the other sites on other classes too for networks that have
+    not seen it'. Each
+    value is the
+    quantity floor_gate reads (analyze_folds.py), a pooled IoU per
+    configuration and seed, averaged. The road is the class whose failure is
+    specific to site A: the paddy edge and the untilled surface are low on
+    every fold, so the sentence names neither."""
     runs = _folds.load_runs("mit_b0")
     floor = config.PLOSO_CONTROL_FLOOR
     site_a = {"leave-one-site-out": _folds.E_FOLD_PROTO["site000"],
@@ -2009,8 +2052,8 @@ def test_site_a_fails_on_the_road_with_the_environment_held_fixed():
             f"{cv} cross-validation it flags {flagged}")
     params = _read_params()
     for macro, cv, cls in (
-            ("gOneRoadSiteZero", "paddy-restricted", "common_road"),
-            ("eThreeTilledSiteZero", "leave-one-site-out",
+            ("roadRiceSiteA", "paddy-restricted", "common_road"),
+            ("tilledLeaveOutSiteA", "leave-one-site-out",
              "paddy_after_driving")):
         printed = re.search(r"\\newcommand\{\\" + macro
                             + r"\}\{(\d\.\d+)\\xspace\}", params).group(1)
@@ -2018,19 +2061,29 @@ def test_site_a_fails_on_the_road_with_the_environment_held_fixed():
         assert f"{value:.3f}" == printed, (
             f"sec. concentration prints \\{macro} as the averaged pooled IoU of "
             f"{cls} on the {cv} fold at site A, but it is {value:.4f}")
+    tilled_rp = {f: averaged(p, "paddy_after_driving")
+                 for f, p in _folds.G_FOLD_PROTO.items()}
+    printed = re.search(r"\\newcommand\{\\tilledRiceSiteA\}\{(\d\.\d+)\\xspace\}",
+                        params).group(1)
+    assert (min(tilled_rp, key=tilled_rp.get) == "site000"
+            and f"{tilled_rp['site000']:.3f}" == printed), (
+        "sec. concentration prints \\tilledRiceSiteA as the tilled surface's "
+        "averaged pooled IoU at site A on the rice-paddy fold, the lowest of the "
+        f"three rice-paddy folds, but the folds give {tilled_rp}")
 
 
-def test_phase_g2_leakage_holds_at_site_a_against_the_matched_comparator():
-    """Gate G2 (config ledger 2026-07-24b). Against the matched pofficial
-    comparator (which differs from ploso in the SPLIT ALONE), NIR's paddy_edge
-    inflation was asked to be directional and the largest of the four arms on
-    both evaluable folds, with the frame-fixed reading G2b - on frames
-    NEITHER condition trained on - concurring (G2b governs). site001 carries no
-    evaluable paddy_edge frame and is protocol out (PLOSO_G2B_FOLDS).
-    Manuscript sec. concentration: 'the paddy-edge inflation of NIR satisfies
-    the three conditions at site A, over three recording sequences, but has an
-    interval spanning zero at site C' and 'At site A, the inflation of every
-    other configuration is also positive with an interval excluding zero'."""
+def test_nir_inflation_at_site_a_on_the_rice_paddy_cross_validation():
+    """Gate G2 (config ledger 2026-07-24b). Against the dataset's split
+    restricted to rice paddy (which differs from the rice-paddy fold in the
+    split alone), NIR's paddy_edge inflation was asked to be directional and
+    the largest of the four arms on both evaluable folds, with the frame-fixed
+    reading G2b - on frames NEITHER condition trained on - concurring (G2b
+    governs). site001 carries no evaluable paddy_edge frame and is protocol
+    out (PLOSO_G2B_FOLDS). Manuscript sec. concentration: training with other
+    frames of site A 'raises the paddy-edge IoU of each of the four input configurations at
+    site A',
+    and 'At site C, NIR's paddy-edge inflation is positive but not
+    detected'."""
     runs = _folds.load_runs("mit_b0")
     px = _folds.A.gt_px()
     fixed = _folds.fixed_sets()
@@ -2078,7 +2131,7 @@ def test_phase_g2_leakage_holds_at_site_a_against_the_matched_comparator():
         f"zero, but the lower ends are {low}")
 
 
-def test_phase_g3_positive_survives_pooled_but_is_carried_by_site000():
+def test_the_pooled_rice_paddy_margin_is_carried_by_site_a():
     """Gate G3 (config.py), phase G's load-bearing deliverable. The
     pooled positive (NIR - LUM on paddy_after_driving) must clear pooled
     over all three control-verified folds. Both halves are asserted, as for
@@ -2133,18 +2186,18 @@ def test_incomplete_phases_are_not_given_a_verdict():
 # number is still checked; what this map then asks is only that the body still
 # says it.
 CRITERION_IN_THE_BODY = {
-    "E1": "At site C, the paddy-edge inflation of NIR is positive",
-    "E2": "In the second criterion's pooled tests, NIR is better than the luminance control on the tilled paddy surface",
-    "E3": r"\eThreeControlSiteZero",
-    "F1": "On both repeat models, which hold out site C alone, the inflation of NIR has an interval spanning zero",
-    "F2": "so the second criterion, which tests the margin on the repeat models, finds no advantage of NIR over the luminance control under the site-blocked protocol",
-    "G1": r"\gOneMinFoldMean",
-    "G2a": r"\gTwoNirEdgeSiteZero",
-    "G2b": "the paddy-edge inflation of NIR satisfies the three conditions at site A",
-    "G3": "In the second criterion's pooled tests, NIR is better than the luminance control on the tilled paddy surface",
-    "H1": "On both repeat models, which hold out site C alone, the inflation of NIR has an interval spanning zero",
-    "H2": "so the second criterion, which tests the margin on the repeat models, finds no advantage of NIR over the luminance control under the site-blocked protocol",
-    "F3 under phase G (POST-HOC)": r"\fusionColorSiteMean",
+    "E1": r"at site A is also positive on the leave-one-site-out fold, at \nirInflationLeaveOutSiteA{}",
+    "E2": "NIR is better than the luminance control on the tilled surface on both cross-validations",
+    "E3": r"\roadLeaveOutSiteA",
+    "F1": r"but not detected on any of the \nModels{} models",
+    "F2": r"the comparison detects no difference on any of the \nModels{} models",
+    "G1": r"\tilledRiceSiteA",
+    "G2a": r"\nirInflationRiceSiteA",
+    "G2b": "raises the paddy-edge IoU of each of the four input configurations at site A",
+    "G3": "NIR is better than the luminance control on the tilled surface on both cross-validations",
+    "H1": r"but not detected on any of the \nModels{} models",
+    "H2": r"the comparison detects no difference on any of the \nModels{} models",
+    "F3 under phase G (POST-HOC)": r"\fusionRgbTilledRiceMean",
 }
 
 
@@ -2188,24 +2241,14 @@ def test_every_committed_criterion_reaches_the_reader():
             "reported")
 
 
-# ---- departures from the committed criteria, and what they cost -------
-# Manuscript sec. methods records two and sec. results that neither costs a
-# verdict, and a disclosure that has stopped being true is worse than one
-# never made. Each half is asserted: the
-# departure still exists as described, and it still costs no verdict.
-
-def test_holm_family_shrinks_where_a_target_class_is_absent():
-    """Manuscript sec. methods: the protocol fixes the correction family at
-    the five target classes, but 'the correction for the leakage inflation of
-    NIR at site A runs over two classes on both cross-validations. On each
-    fold at site A, every frame that both networks of the inflation score is
-    rice paddy', and 'Giving each other target
-    class a p value of 1 restores a correction over 5 classes and leaves that
-    inflation's outcome unchanged on both folds.'
-
-    Forcing the family back to five by entering each absent class at p = 1
-    must leave every affected verdict unchanged - that is what lets the
-    manuscript record the departure instead of re-running the analysis."""
+def test_every_verdict_holds_under_a_five_class_holm_family():
+    """Manuscript sec. criteria: one configuration is better than another when
+    the paired Wilcoxon signed-rank test 'rejects a median difference of zero at the 0.05 level after a Holm
+    correction ..., which adjusts the tests of the target classes'. On a
+    fold where fewer target classes are evaluable, the analyzer corrects over
+    the classes that are. Entering each absent class at p = 1 restores a
+    family of five, and this must leave every verdict unchanged, so the
+    sentence holds for the verdicts that the paper prints."""
     runs = _folds.load_runs("mit_b0")
     px = _folds.A.gt_px()
     fixed = _folds.fixed_sets()
@@ -2215,7 +2258,6 @@ def test_holm_family_shrinks_where_a_target_class_is_absent():
                       for f, p in _folds.G_FOLD_PROTO.items()}, None),
              "G2b": ({f: ("pofficial", p)
                       for f, p in _folds.G_FOLD_PROTO.items()}, fixed)}
-    shrunk, families = [], set()
     for gate, (pairs, restrict_by_fold) in gates.items():
         for fold, (leaked, blocked) in pairs.items():
             restrict = (None if restrict_by_fold is None
@@ -2233,104 +2275,23 @@ def test_holm_family_shrinks_where_a_target_class_is_absent():
                 if not live or si.get("paddy_edge") is None:
                     continue
                 absent = [c for c in TARGETS if c not in live]
-                if absent:
-                    shrunk.append((gate, fold, arm, len(live)))
-                    families.add(frozenset(live))
                 got = _folds.sec7(si, so, "paddy_edge")
                 forced = _folds.A.verdict(
                     "paddy_edge", si["paddy_edge"], so.get("paddy_edge"),
                     _folds.A.holm({**live, **{c: 1.0 for c in absent}})
                     .get("paddy_edge"))
                 assert got == forced, (
-                    "manuscript sec. results states that forcing the "
-                    "correction family back to the five target classes "
-                    "leaves every affected verdict unchanged, but "
+                    "manuscript sec. criteria states a correction over the "
+                    "five target classes, and forcing the family back to five "
+                    "must leave every verdict unchanged, but "
                     f"{gate}/{fold}/{arm} reads '{got}' as run and "
                     f"'{forced}' at the protocol family size")
-    assert shrunk, (
-        "manuscript sec. methods discloses that the correction ran over "
-        "fewer than the five committed target classes on some folds; no "
-        "such fold now exists, so the disclosure is stale")
-    assert {f for _, f, _, _ in shrunk} == {"site000"}, (
-        "manuscript sec. methods attributes the shrunken family to the "
-        "site with most dry-field frames alone, but it now also occurs on "
-        f"{sorted({f for _, f, _, _ in shrunk}) }")
-    assert {m for _, _, _, m in shrunk} == {2}, (
-        "manuscript sec. methods states the correction there ran over the "
-        f"two classes that remain, but the realised family sizes are "
-        f"{sorted({m for _, _, _, m in shrunk})}")
-    assert families == {frozenset({"paddy_edge", "paddy_after_driving"})}, (
-        "manuscript sec. methods states that only the paddy edge and the "
-        "tilled paddy surface are evaluable on those frames, but the families "
-        f"that ran are {sorted(sorted(f) for f in families)}")
-    shared = {"E1": "leave-one-site-out", "G2a": "paddy-restricted",
-              "G2b": "paddy-restricted"}
-    assert ({shared[g] for g, _, _, _ in shrunk}
-            == {"leave-one-site-out", "paddy-restricted"}), (
-        "manuscript sec. methods states the correction runs over two classes "
-        "'on both cross-validations', but it shrinks only on "
-        f"{sorted({shared[g] for g, _, _, _ in shrunk})}")
-
-
-def test_site_a_frames_shared_with_the_sequence_level_split_are_all_rice_paddy():
-    """Manuscript sec. criteria: 'On each fold at site A, every frame that
-    both networks of the inflation score is rice paddy, because the
-    paddy-restricted cross-validation evaluates rice paddy alone and because
-    the leave-one-site-out fold takes its seen network from the sequence-level
-    split, whose validation frames include no dry-field sequence of site A.' The first reason
-    is the
-    paddy-restricted cross-validation's environment; the second is read from
-    the split."""
-    assert config.PLOSO_ENV == "Paddy", (
-        "manuscript sec. criteria states the paddy-restricted cross-validation "
-        f"evaluates rice paddy alone, but it is confined to {config.PLOSO_ENV}")
-    members = set(next(x for x in _splits()["sites"]
-                       if x["site_id"] == "site000")["members"])
-    in_a = [r for r in config.load_index()
-            if f"{r['osplit']}/{r['env']}/{r['seq']}" in members]
-    field = {r["osplit"] for r in in_a if r["env"] == "Field"}
-    assert field == {"train"}, (
-        "manuscript sec. criteria states the validation frames of the "
-        "sequence-level split include no dry-field sequence of site A, but "
-        f"those frames fall in {field}")
-    held = {r["env"] for r in in_a if r["osplit"] == "val"}
-    assert held == {"Paddy"}, (
-        "manuscript sec. criteria states the frames of site A that the "
-        f"sequence-level split holds out are all rice paddy, but they are {held}")
-
-
-def test_the_tilled_surface_is_the_only_target_class_every_paddy_fold_scores():
-    """Manuscript sec. protocols: 'We added the paddy-restricted
-    cross-validation because the floor flagged the leave-one-site-out fold at
-    site A, the fold whose training set underrepresents the dry field. That
-    cross-validation evaluates rice paddy alone, so its floor's class is a
-    class of rice paddy itself rather than the farm access road: we took the
-    tilled paddy surface, the only target class that each of its folds
-    scores.' The flag is the floor's
-    reading of the road on that fold, and the classes that each
-    paddy-restricted fold scores are read from its runs."""
-    runs, px = _folds.load_runs("mit_b0"), _folds.A.gt_px()
-    road_a = _fold_mean(runs, _folds.E_FOLD_PROTO["site000"], "common_road")
-    assert road_a < config.PLOSO_CONTROL_FLOOR, (
-        "manuscript sec. protocols states the paddy-restricted "
-        "cross-validation was added because the floor flagged the "
-        f"leave-one-site-out fold at site A, but the road there is {road_a:.3f}, "
-        f"at or above the {config.PLOSO_CONTROL_FLOOR} floor")
-    scored = [{c for c, v in _folds.A.paired_family(
-                   runs, p, "NIR", "LUM", "isec", px).items()
-               if v is not None and c in TARGETS}
-              for p in _folds.G_FOLD_PROTO.values()]
-    common = set.intersection(*scored)
-    assert common == {"paddy_after_driving"}, (
-        "manuscript sec. protocols names the tilled paddy surface as the only "
-        "target class that every paddy-restricted fold scores, but the folds "
-        f"share {sorted(common)}")
 
 
 def test_sampled_frames_are_those_whose_number_is_a_multiple_of_the_stride():
-    """Manuscript sec. materials: 'we keep the frames whose number within
-    their recording sequence is a multiple of a fixed frame stride', which gives
-    the sampled frames that every split divides."""
+    """Manuscript sec. materials: 'We keep the frames whose number within
+    their sequence is a multiple of a fixed stride', which gives the sampled
+    frames that every split divides."""
     recs = config.load_index()
     off = [(r["seq"], r["frame"]) for r in recs
            if r["frame"] % config.FRAME_STRIDE]
@@ -2344,12 +2305,11 @@ def test_sampled_frames_are_those_whose_number_is_a_multiple_of_the_stride():
 
 
 def test_the_inflation_on_the_fold_below_the_floor_excludes_zero():
-    """Manuscript sec. concentration: 'Against the sequence-level split, the
-    paddy-edge inflation of NIR also has an interval excluding zero on the
-    leave-one-site-out fold at site A' and
-    tab:margins prints it, +0.211. The third criterion is evaluated at every
-    held-out site where the paddy edge is evaluable, so its outcome on
-    the fold below the floor reaches the reader too."""
+    """Manuscript sec. concentration: 'NIR's paddy-edge inflation at site A
+    is also positive on the leave-one-site-out fold, at +0.211, and its
+    interval lies above zero.' The criterion is
+    evaluated at every held-out site where the paddy edge is evaluable, so
+    its outcome on that fold reaches the reader too."""
     s = _folds.paired_protocols(_folds.load_runs("mit_b0"), "NIR", "official",
                                 _folds.E_FOLD_PROTO["site000"], "isec",
                                 _folds.A.gt_px())["paddy_edge"]
@@ -2361,16 +2321,15 @@ def test_the_inflation_on_the_fold_below_the_floor_excludes_zero():
 
 
 def test_the_pooled_arm_gate_applies_no_correction_and_none_is_needed():
-    """Manuscript sec. methods: 'The other analysis, the second criterion,
-    runs single comparisons, so it applies no correction'; sec. results: the
-    interval of the margin 'spans zero on the primary model and on both repeat
-    models', and in the pooled tests 'the Wilcoxon test rejects, and the
-    margin is also positive on the NIR annotation.'
+    """Manuscript sec. redundancy: 'the comparison detects no difference on
+    any of the three models', and 'Pooled over the folds, NIR is better than
+    the luminance control on the tilled surface on both cross-validations',
+    which by the three conditions means that the Wilcoxon test rejects and the
+    margin is also positive on the NIR annotation. The criterion runs single
+    comparisons, so its Holm correction is its own p value.
 
     Asserted on the pooled cells analyze_folds.py actually gates, so the
-    sentences track the code rather than a memory of it. The count of failing
-    cells is a claim over the same set, so it is read off that set rather than
-    left as a word nothing recomputes."""
+    sentences track the code rather than a memory of it."""
     px = _folds.A.gt_px()
     b0 = _folds.load_runs("mit_b0")
     cells = {
@@ -2394,17 +2353,17 @@ def test_the_pooled_arm_gate_applies_no_correction_and_none_is_needed():
         if not (p < config.ALPHA and ci_excl):
             failing.append(name)
             assert not ci_excl, (
-                f"manuscript sec. results states that the failing cells' "
-                f"intervals span zero, but {name} has p={p:.3g} and interval "
+                f"manuscript sec. results states that the failing cells "
+                f"detect no difference, but {name} has p={p:.3g} and interval "
                 f"[{lo:+.4f},{hi:+.4f}]")
     assert set(failing) == {"F2", "H2"}, (
-        "manuscript sec. results places the cells whose interval spans zero "
+        "manuscript sec. results places the cells that detect no difference "
         f"on both repeat models, but they are {sorted(failing)}")
-    assert ("on the primary model and on both repeat models"
+    assert (r"detects no difference on any of the \nModels{} models"
             in " ".join(_read_tex().split())), (
-        "manuscript sec. results says the interval spans zero 'on the primary "
-        "model and on both repeat models', and those two cells are "
-        f"{sorted(failing)}")
+        "manuscript sec. results says 'detects no difference on any of the "
+        "three models', and the two cells that detect none beside the primary "
+        f"model are {sorted(failing)}")
     for fold_proto in (_folds.E_FOLD_PROTO, _folds.G_FOLD_PROTO):
         n_tot, s_tot = 0, 0.0
         for proto in fold_proto.values():
@@ -2419,26 +2378,21 @@ def test_the_pooled_arm_gate_applies_no_correction_and_none_is_needed():
 
 
 def test_the_excess_of_nir_over_every_other_inflation_is_detected_under_mit_b2_and_at_site_a():
-    """Manuscript sec. concentration: 'The inflation of NIR exceeds that of
-    each other configuration there, each paired difference with an interval
-    excluding zero', 'At site C, each of those paired differences has an interval
-    spanning zero', and 'Under the MiT-B2 encoder, the paired difference
-    between NIR's inflation and that of each other configuration has an
-    interval excluding zero, whereas under UPerNet/ConvNeXt-V2-T each of those
-    intervals spans zero'; sec. discussion: 'NIR's excess over the inflation of
-    the luminance control is detected at site A and under the MiT-B2 encoder,
-    but not under UPerNet/ConvNeXt-V2-T or at site C on the primary model'; and
-    sec. concentration: 'whereas at site C none of the three models detects a
-    rise in the IoU of NIR', which the gate tests of each model assert.
+    """Manuscript sec. concentration: 'NIR's inflation at site A, ..., exceeds that
+    of each other configuration', and 'Under the MiT-B2 encoder, NIR's inflation there nonetheless exceeds
+    that of each other configuration, whereas on the primary model and under
+    UPerNet/ConvNeXt-V2-T it exceeds that of none.', where sec. criteria
+    says that 'NIR's inflation exceeds another configuration's when the 95% interval
+    of the mean difference between their per-frame gains excludes zero'; and 'but not
+    detected on any of the three models', which the gate tests of each model
+    assert.
 
     A ranking between configurations is a directional claim, so each excess is
     the paired per-frame difference of two inflations with its interval over
     sequences (analyze_folds.py paired_arm_inflation), never the larger of two
     point estimates. The rows are the five tab:robustness(a) carries, read
     through build_tables.py's own robustness(), and the other configurations
-    are the arms the runs hold. The leave-one-site-out cross-validation's fold
-    at site A is not read: sec. methods reads no inflation on a fold below the
-    floor as site leakage specific to the inflation's class."""
+    are the arms the runs hold."""
     px = _folds.A.gt_px()
     G = _gen_tables()
     rows_a, _ = G.robustness(px)
@@ -2463,24 +2417,21 @@ def test_the_excess_of_nir_over_every_other_inflation_is_detected_under_mit_b2_a
 
 
 def test_no_inflation_is_detected_at_site_c_on_the_primary_model():
-    """Manuscript sec. concentration: 'At site C, the paddy-edge inflation of
-    NIR is positive (Table~\\ref{tab:perclass}). The Wilcoxon test on it
-    rejects, but its interval spans zero' and 'The intervals of the paired
-    differences between NIR's inflation and that of each other configuration
-    also span zero there, and so does the interval of the luminance control's
-    inflation minus RGB's'. This is gate E1 at site C, the fold that the
-    leave-one-site-out cross-validation shares with the site-blocked protocol.
-    The differences with NIR are the tab:robustness(a) cells, and the
-    luminance control's is the tab:margins row that leakage_isolation.py's
-    per-frame deltas give."""
+    """Manuscript sec. concentration: 'At site C, NIR's paddy-edge inflation
+    is positive but not detected on any of the three models, because its
+    interval spans zero' and 'Under the MiT-B2 encoder, NIR's inflation there nonetheless exceeds
+    that of each other configuration, whereas on the primary model and under
+    UPerNet/ConvNeXt-V2-T it exceeds that of none.'. This is gate E1 at site C, the leave-one-site-out fold on
+    which the repeat models also run. The differences with NIR are the
+    tab:robustness(a) cells."""
     runs, px = _folds.load_runs("mit_b0"), _folds.A.gt_px()
     si = _folds.paired_protocols(runs, "NIR", "official", "blocked", "isec", px)
     so = _folds.paired_protocols(runs, "NIR", "official", "blocked", "nir", px)
     s, v = si["paddy_edge"], _folds.sec7(si, so, "paddy_edge")
-    assert (s["mean"] > 0 and s["p"] < config.ALPHA and s["lo"] < 0 < s["hi"]
+    assert (s["mean"] > 0 and s["lo"] < 0 < s["hi"]
             and not v.startswith("DIRECTIONAL")), (
         "sec. concentration reports NIR's paddy-edge inflation at site C as "
-        "positive with a rejecting Wilcoxon test and an interval spanning zero, "
+        "positive with an interval spanning zero, "
         f"but it is {s['mean']:+.3f}, p={s['p']:.2e}, "
         f"[{s['lo']:+.3f}, {s['hi']:+.3f}], verdict '{v}'")
     rows_a, _ = _gen_tables().robustness(px)
@@ -2490,77 +2441,26 @@ def test_no_inflation_is_detected_at_site_c_on_the_primary_model():
         assert st["lo"] < 0 < st["hi"], (
             f"sec. concentration reports NIR's excess over {arm} at site C as "
             f"spanning zero, but it is [{st['lo']:+.3f}, {st['hi']:+.3f}]")
-    liso = _load("leakage_isolation.json")["arms"]
-    ex, ey = liso["LUM"]["isec"], liso["RGB"]["isec"]
-    assert ex["perframe_units"] == ey["perframe_units"], (
-        "the manuscript pairs the luminance control against RGB on the "
-        "intersection ground truth, which requires identical frame sets; they "
-        "now differ")
-    u = [tuple(x.split("/")) for x in ex["perframe_units"]]
-    d = np.array(ex["perframe_deltas"]) - np.array(ey["perframe_deltas"])
-    lo, hi = _folds.A.cluster_ci(d, u)
-    assert lo < 0 < hi, (
-        "sec. concentration reports the luminance control's inflation minus "
-        f"RGB's at site C as spanning zero, but it is [{lo:+.3f}, {hi:+.3f}]")
 
 
 # ------------- the body table's digest of the per-class results ------------
-# Sec. results prints the leakage inflation rather than the sequence-level-split
-# accuracies, so three things need checking: the inflation must be one
-# estimator wherever the paper prints it, the body's ranking claim must
-# follow from the table's cells, and every configuration must still reach the
-# reader under both partitions.
+# tab:perclass prints every configuration's accuracy under the dataset's split
+# and at site C, so two things need checking: the table carries no test that
+# the paper does not state, and every configuration reaches the reader under
+# both partitions.
 
 def _gen_tables():
     return importlib.import_module("build_tables")
 
 
-def test_the_inflation_is_one_estimator_across_the_paper():
-    """Manuscript sec. methods defines the leakage inflation once: it
-    'compares two networks of the configuration on one site's frames that both
-    networks score', one trained on a split whose training
-    set holds other frames of that site and one on a split that holds the whole
-    site out, named 'the seen network' and 'the unseen network'. Two
-    implementations compute it. leakage_isolation.py runs the models over the
-    frames that
-    are validation under BOTH protocols and persists the per-frame deltas;
-    analyze_folds.py paired_protocols intersects the two protocols' scored frames from
-    the committed per-frame arrays.
-
-    Nothing forces those to agree, and sec. concentration places their
-    outputs beside one another: the luminance control's inflation minus RGB's
-    in tab:margins comes from leakage_isolation.py, and the inflation cells of
-    tab:perclass and tab:robustness from analyze_folds.py. If the frame sets
-    ever diverge, the two stop being comparable while every macro stays
-    correct."""
-    liso = _load("leakage_isolation.json")["arms"]
-    b0 = _folds.load_runs("mit_b0")
-    px = _folds.A.gt_px()
-    for arm in ("RGB", "LUM", "NIR"):
-        a = liso[arm]["isec"]
-        s = _folds.paired_protocols(b0, arm, "official", "blocked",
-                                    "isec", px)["paddy_edge"]
-        assert len(a["perframe_deltas"]) == s["n"], (
-            "manuscript sec. methods defines ONE leakage inflation, but "
-            f"leakage_isolation.py scores {arm} on "
-            f"{len(a['perframe_deltas'])} frames and "
-            f"analyze_folds.py paired_protocols on {s['n']}, so sec. results compares "
-            "three models on frame sets that are no longer the same")
-        assert abs(a["perframe_delta_mean"] - s["mean"]) < 1e-6, (
-            f"the two implementations of the leakage inflation disagree on "
-            f"{arm}: leakage_isolation.py gives "
-            f"{a['perframe_delta_mean']:+.6f}, analyze_folds.py "
-            f"gives {s['mean']:+.6f}")
-
-
 def test_the_body_table_reports_no_test_it_did_not_commit():
-    """Sec. methods specifies the inflation criterion on one cell: 'The third
-    criterion applies the three conditions to the paddy-edge leakage
-    inflation of NIR'. The body table tab:perclass prints every
-    configuration's inflation on every class, so it must carry no per-cell
-    test: a significance marker or an interval across a class-by-configuration
-    grid would be a multiple comparison no criterion covers. The criterion's
-    interval is printed with its sequence count in tab:robustness."""
+    """The body table tab:perclass prints every configuration's pooled IoU on
+    every class under two partitions, so it must carry no per-cell test: a
+    significance marker or an interval across a class-by-configuration grid
+    would be a multiple comparison that sec. criteria does not state. The
+    paired comparisons and their intervals are tab:margins', and the
+    inflation criterion's interval is printed with its sequence count in
+    tab:robustness."""
     t = _read_table("table_perclass_iou.tex")
     body = t.split(r"\midrule", 1)[1]
     # The tells are cell markers, so they are read off the rows alone. The
@@ -2573,14 +2473,8 @@ def test_the_body_table_reports_no_test_it_did_not_commit():
             "which reads as a per-cell test; sec. methods commits a criterion "
             "on one cell only")
     assert "[" not in body, (
-        "the body table prints an interval, but sec. methods declares the "
-        "inflation criterion on one cell, whose interval tab:robustness prints")
-    flat = " ".join(_read_tex().split())
-    assert ("The third criterion applies the three conditions to the "
-            "paddy-edge leakage inflation of NIR") in flat, (
-        "sec. methods no longer names the one inflation that the third "
-        "criterion tests, so the inflation column of tab:perclass reads as "
-        "carrying a test on every cell")
+        "the body table prints an interval, but its cells are pooled IoUs, "
+        "whose paired comparisons tab:margins prints")
     folds = importlib.import_module("analyze_folds")
     A = importlib.import_module("analyze")
     gate = folds.paired_protocols(folds.load_runs("mit_b0"), folds.GATE_ARM,
@@ -2594,13 +2488,9 @@ def test_the_body_table_reports_no_test_it_did_not_commit():
 
 
 def test_every_configuration_of_both_partitions_reaches_the_reader():
-    """The paper prints no table of the sequence-level split's own
-    accuracies, so each configuration's runs under either partition reach the
-    reader through the body table: the site-blocked accuracy cells and the
-    inflation cells, which pair the two partitions frame by frame. Sec.
-    concentration prints the sequence-level split's paddy-edge accuracy for
-    near-infrared and RGB, with the spread sec. methods promises for every
-    accuracy.
+    """tab:perclass prints each configuration's pooled IoU under the dataset's
+    split, the diagnostic network included, and at site C, with the spread
+    that sec. criteria promises for every IoU.
 
     Derived from the runs rather than from the columns the table carries: a
     configuration the runs hold under either partition and no cell prints is
@@ -2609,24 +2499,19 @@ def test_every_configuration_of_both_partitions_reaches_the_reader():
     runs = _folds.A.load_runs()
     held = {(m["arm"], m["protocol"]) for m in runs
             if m["train_env"] == "all" and m["protocol"] in ("blocked", "official")}
-    shown = {(arm, proto) for arm, _ in G.COLS for proto in ("blocked", "official")}
-    assert held == shown, (
-        f"the headline runs hold configurations {sorted(held)} under the two "
-        f"partitions, and the body table prints {sorted(shown)}")
     body = _read_table("table_perclass_iou.tex")
-    infl = G.inflation(_folds.A.gt_px())
-    for row in G.BODY_ROWS:
-        if row is None:
-            continue
-        cls, label = row
-        for arm, _ in G.COLS:
-            c, i = G.cell(runs, arm, "blocked", cls), G.infl_cell(infl, arm, cls)
-            assert c in body and i in body and r"\textemdash" not in (c, i), (
-                f"the body table's {label} row prints no site-blocked accuracy "
-                f"or no inflation for {arm}, so that configuration's runs reach "
-                "the reader under one partition only")
+    for arm, proto in sorted(held):
+        for row in G.BODY_ROWS:
+            if row is None:
+                continue
+            cls, label = row
+            c = G.cell(runs, arm, proto, cls)
+            assert c in body and c != r"\textemdash", (
+                f"the body table's {label} row prints no {proto} accuracy for "
+                f"{arm}, so that configuration's runs go unreported")
     params = _read_params()
-    for arm, macro in (("NIR", "nirEdgeOfficial"), ("RGB", "rgbEdgeOfficial")):
+    for arm, macro in (("NIR", "nirEdgeSplit"), ("RGB", "rgbEdgeSplit"),
+                       ("RGBNIR", "fusionEdgeSplit")):
         v = [m["iou"]["isec"]["paddy_edge"] for m in runs
              if m["arm"] == arm and m["protocol"] == "official"
              and m["train_env"] == "all"]
@@ -2634,21 +2519,20 @@ def test_every_configuration_of_both_partitions_reaches_the_reader():
         got = re.search(rf"\\newcommand\{{\\{macro}\}}\{{\\ensuremath\{{([^}}]+)\}}",
                         params)
         assert got and got.group(1) == want, (
-            "sec. concentration prints the sequence-level split's paddy-edge "
+            "the paper prints the dataset split's paddy-edge "
             f"accuracy for {arm} as a mean with its spread over the "
             f"{len(v)} seeds, {want}, but params.tex prints "
             f"{got.group(1) if got else 'no such macro'}")
-    tex = " ".join(_read_tex().split())
-    assert ("standing rice-crop class, which our networks segment. No claim "
-            "uses that class") in tex, (
-        "the models segment standing rice and no table prints it, so sec. "
-        "materials must say that no claim uses it, or the class goes unreported")
+    assert "standing rice" in _read_table("table_config.tex"), (
+        "the models segment standing rice and no other table prints it, so "
+        "tab:config must list it among the classes the networks segment")
 
 
 def test_the_paper_recomputes_without_the_imagery():
     """Availability statement: 'Every comparison between trained networks in
     this letter can be recomputed from the released artifacts alone, whereas
-    retraining the networks and measuring the offset need the imagery.'
+    retraining the networks, measuring the offset and measuring the agreement
+    between the annotations need the imagery and its annotations.'
 
     That is a claim about which files the paper's chain opens, and a clone
     with no data/ directory in it is what tests it. Checked as a static
@@ -2709,11 +2593,15 @@ def test_the_directional_rule_the_paper_states_is_the_one_the_code_applies():
     than over the cells the manuscript names, and the rule itself is read from
     analyze.py rather than restated."""
     flat = " ".join(_read_tex().split())
-    assert "satisfies three conditions" in flat, (
+    assert ("One configuration is better than another when three conditions "
+            "hold") in flat and ("Third, the margin keeps its sign when the "
+            "comparison is scored on a single annotation instead of the "
+            "intersection ground truth") in flat, (
         "analyze.py verdict() applies three conditions to every verdict the "
         "paper prints; sec. methods no longer states three, so the paper "
         "reports a rule it did not run")
-    assert "the margin has the same sign on a single annotation" in flat, (
+    assert ("the NIR annotation, on which NIR trains, when NIR is compared "
+            "and the RGB annotation otherwise") in flat, (
         "sec. methods states the three conditions but no longer names the "
         "single-annotation one, which is the condition analyze.py adds to the "
         "committed criterion")
@@ -2722,8 +2610,8 @@ def test_the_directional_rule_the_paper_states_is_the_one_the_code_applies():
         stated = "nir" if "NIR" in (ax, ay) else "rgb"
         assert A.own_proto(ax) == stated, (
             "sec. methods says the third condition is measured on 'the NIR "
-            "annotation when NIR is one of the two configurations compared, "
-            f"and the RGB annotation otherwise', which gives the "
+            "annotation, on which NIR trains, when NIR is compared and the RGB "
+            f"annotation otherwise', which gives the "
             f"{stated} annotation for {ax} - {ay}, but analyze.py own_proto "
             f"scores that family on the {A.own_proto(ax)} annotation")
     runs, px = A.load_runs(), A.gt_px()
@@ -2781,52 +2669,52 @@ def test_every_training_restriction_the_runs_used_reaches_the_reader():
 
 
 def test_no_configuration_outperforms_color_at_every_held_out_super_site():
-    """Manuscript abstract and sec. redundancy: no configuration outperforms
-    RGB on any traversability class at every held-out site.
+    """Manuscript sec. intro: 'every gain of a configuration over RGB on one of the five classes at a
+    held-out site is not detected at another held-out site that has at least 50 frames of
+    the class', and the abstract states the same.
 
     The set is every configuration against RGB on every target class, at
-    every fold of both cross-validations; the site-blocked protocol is the
-    leave-one-site-out cross-validation's fold at its site, and a class is scored at
-    a fold only with the frame minimum of sec. methods behind it. A
-    configuration outperforms RGB at a fold when its paired interval there
-    lies above zero, the condition every directional reading requires, so
-    the check can only grant more gains than the three conditions would. The
-    claim fails if any configuration and class hold such a gain at every fold
-    of either cross-validation, which requires the class to be scored at all three."""
+    every fold of both cross-validations; a class is scored at a fold only
+    with the frame minimum of sec. protocols behind it. A configuration gains
+    over RGB at a fold when its paired interval there lies above zero, the
+    condition every directional reading requires, so the check can only grant
+    more gains than the three conditions would. The claim fails where a gain
+    has no other scored fold of the same cross-validation at which it is
+    absent, including a class that only one fold scores."""
     A = importlib.import_module("analyze")
     runs, px = A.load_runs(), A.gt_px()
-    everywhere = []
-    for rot, folds in (("unrestricted", _folds.E_FOLD_PROTO),
-                       ("paddy-restricted", _folds.G_FOLD_PROTO)):
+    unanswered = []
+    for rot, folds in (("leave-one-site-out", _folds.E_FOLD_PROTO),
+                       ("rice-paddy", _folds.G_FOLD_PROTO)):
         fams = {(arm, f): A.paired_family(runs, p, arm, "RGB", "isec", px)
                 for arm in ("NIR", "LUM", "RGBNIR") for f, p in folds.items()}
         for arm in ("NIR", "LUM", "RGBNIR"):
             for cls in TARGETS:
-                cells = [fams[arm, f].get(cls) for f in folds]
-                scored = [c for c in cells if c is not None
-                          and c["n"] >= config.MIN_VAL_FRAMES]
-                if (len(scored) == len(folds)
-                        and all(c["lo"] > 0 for c in scored)):
-                    everywhere.append((rot, arm, cls))
-    assert not everywhere, (
-        "the abstract states no configuration outperforms RGB on any "
-        "traversability class at every held-out site, but these hold a gain "
-        f"with an interval above zero at every fold that scores the class: "
-        f"{everywhere}")
+                scored = {f: fams[arm, f][cls] for f in folds
+                          if fams[arm, f].get(cls) is not None
+                          and fams[arm, f][cls]["n"] >= config.MIN_VAL_FRAMES}
+                for f, c in scored.items():
+                    if c["lo"] > 0 and not any(o["lo"] <= 0 for g, o in
+                                               scored.items() if g != f):
+                        unanswered.append((rot, arm, cls, f))
+    assert not unanswered, (
+        "sec. intro states that every gain over RGB at a held-out site is "
+        "absent at another held-out site that has at least 50 frames of the "
+        "class, but these "
+        f"gains have no such site: {unanswered}")
 
 
 def test_only_evaluable_classes_are_scored():
-    """Manuscript sec. protocols: 'A class is evaluable under a split when at
-    least 50 of the split's validation frames contain it, so that no IoU
-    rests on a few frames, and only evaluable classes are scored.'
+    """Manuscript sec. protocols: 'A class is scored at a held-out site when at
+    least 50 of the site's frames carry it.'
 
     The analyzers score a class from the frames that enter its comparison,
     so the minimum has to hold there: a cell below it must come back
     unscored, or it joins a Holm family and folds.md prints a verdict the
-    paper says is never computed. The paddy-restricted fold at site B is
-    where a class falls between the two thresholds the code could apply:
-    its intersection ground truth marks the field ridge on fewer frames than
-    the minimum, and on more than none."""
+    paper says is never computed. The rice-paddy fold at site B is where a
+    class falls between the two thresholds the code could apply: its
+    intersection ground truth marks the field ridge on fewer frames than the
+    minimum, and on more than none."""
     runs, px = _folds.A.load_runs(), _folds.A.gt_px()
     proto = _folds.G_FOLD_PROTO["site001"]
     arm = _folds.A.paired_family(runs, proto, "NIR", "RGB", "isec", px)
@@ -2850,9 +2738,9 @@ def test_only_evaluable_classes_are_scored():
 
 
 def test_the_site_blocked_super_site_is_the_only_one_meeting_the_frame_minima():
-    """Manuscript sec. methods: 'Of the 3 sites, only site C meets both minima
-    for every class but the in-field trees.' Derived over every
-    site from the split's own per-site class counts."""
+    """Manuscript sec. protocols: 'Only site C holds at least 50 frames of every target class, with at
+    least 200 training frames of each at the other two sites.' Derived over every site from the
+    split's own per-site class counts."""
     sp = json.load(open(config.SPLITS_JSON))
     sites = sp["sites"]
     ok = []
@@ -2876,27 +2764,6 @@ def test_the_site_blocked_super_site_is_the_only_one_meeting_the_frame_minima():
     assert config.FLOOR_EXEMPT == ["common_tree"], (
         "manuscript sec. methods exempts only the in-field trees from the "
         f"frame minima, but config.py exempts {config.FLOOR_EXEMPT}")
-
-
-def test_the_in_field_trees_are_a_control_only_under_the_sequence_level_split():
-    """Manuscript sec. methods: 'Nearly all frames of the in-field trees lie
-    in site A, so no split that holds a site out both trains and scores that
-    class. The in-field trees therefore serve as a control only under the
-    sequence-level split.'
-    Read off the split's per-site class counts against the two frame minima,
-    for every site that a split could hold out."""
-    sites = {x["site_id"]: x for x in json.load(open(config.SPLITS_JSON))["sites"]}
-    n = {sid: v["class_frames"].get("common_tree", 0) for sid, v in sites.items()}
-    total = sum(n.values())
-    assert n["site000"] / total > 0.99, (
-        "sec. methods states that nearly all in-field-tree frames lie in site "
-        f"A, but the sites hold {n}")
-    for held, n_val in n.items():
-        n_train = total - n_val
-        assert n_val < config.MIN_VAL_FRAMES or n_train < config.MIN_TRAIN_FRAMES, (
-            "sec. methods states that no split holding a site out both trains "
-            f"and scores the in-field trees, but holding out {held} leaves "
-            f"{n_train} training and {n_val} validation frames of the class")
 
 
 def test_every_macro_the_parameter_file_defines_reaches_the_page():
@@ -3431,11 +3298,12 @@ def test_every_path_a_script_builds_from_its_own_location_lands_in_the_tree():
 
 
 def test_every_direction_check_reads_the_supervising_annotation():
-    """Manuscript sec. methods: the third directional condition is measured
-    on 'a single annotation', and 'When NIR is one of the two configurations,
-    both are scored on the NIR annotation, so that NIR is checked on its own
-    camera's annotation. Otherwise both are scored on the RGB annotation, on
-    which both train.' Which
+    """Manuscript sec. criteria: the third condition is that 'the margin keeps its sign when the
+    comparison is scored on a single annotation instead of the intersection
+    ground truth, so that the pixels on which the two annotations disagree
+    are scored too. That annotation is the NIR
+    annotation, on which NIR trains, when NIR is compared and the RGB
+    annotation otherwise'. Which
     annotation supervises a configuration is one fact, src/train.py SUP_MASK, so
     every reader of that rule returns what SUP_MASK assigns rather than a
     copy of it.
@@ -3451,14 +3319,11 @@ def test_every_direction_check_reads_the_supervising_annotation():
     """
     train = importlib.import_module("train")
     A = importlib.import_module("analyze")
-    leak = importlib.import_module("phases.leakage_isolation")
     folds = importlib.import_module("analyze_folds")
 
     for arm, mask in train.SUP_MASK.items():
         want = mask[len("mask_"):]
-        for mod, fn in (("analyze.py", A.own_proto),
-                        ("leakage_isolation.py",
-                         leak.own_proto)):
+        for mod, fn in (("analyze.py", A.own_proto),):
             assert fn(arm) == want, (
                 f"src/train.py supervises {arm} with {mask}, so sec. methods "
                 f"measures a {arm} comparison on the {want!r} annotation; "
@@ -3509,7 +3374,7 @@ def test_the_manuscript_names_the_rule_and_the_criteria_one_way_each():
     that every comparison between configurations uses is stated as three
     conditions and carries no name of its own, by the global rule against
     invented terms. A criterion is one committed gate, named by the ordinal
-    Methods assigns it, and 'the three criteria' names the set. Two names for one object make a reader check
+    Methods assigns it, and 'two criteria' names the set. Two names for one object make a reader check
     whether a second object entered, and 'the protocol rule' and 'the protocol
     criteria' differ by one noun while naming different things.
 
@@ -3527,18 +3392,17 @@ def test_the_manuscript_names_the_rule_and_the_criteria_one_way_each():
 
 
 def test_the_manuscript_names_every_class_it_drops_for_want_of_training_data():
-    """Manuscript sec. materials: 'Two further classes of the guideline,
-    standing water and dry-field crop, appear only in the annotations of the
-    dataset's own validation set, so we merge their pixels into the
-    background.'
+    """Table tab:config lists the classes that the networks segment, 'and
+    background, which also covers standing water and dry-field crop, the two
+    classes that only the validation set annotates'.
 
     The set that sentence ranges over is derived from the inventory rather
     than read off the sentence. A class annotated only in the validation
     material is untrainable on the same ground as the one the sentence used
-    to name alone, and an unnamed one disappears into 'All other pixels form
-    the background' with every count in the paper still correct. The
-    inventory counts the whole walk, so a class with no training instance
-    there has none in the scene-matched subset either."""
+    to name alone, and an unnamed one disappears into the background with
+    every count in the paper still correct. The inventory counts the whole
+    walk, so a class with no training instance there has none in the
+    scene-matched subset either."""
     inv = _load("inventory.json")["instance_counts"]
     train, val = defaultdict(int), defaultdict(int)
     for key, n in inv.items():
@@ -3546,7 +3410,7 @@ def test_the_manuscript_names_every_class_it_drops_for_want_of_training_data():
         if env in config.ENVS:
             (train if split == "train" else val)[cls] += n
     gloss = {"paddy_water": "standing water", "field_corps": "dry-field crop"}
-    tex = " ".join(_read_tex().split())
+    tex = " ".join((_read_tex() + _read_table("table_config.tex")).split())
     for cls in sorted(c for c, n in val.items() if n and train[c] == 0):
         assert cls in gloss, (
             f"{cls} is annotated in the studied environments and has no "
@@ -3554,52 +3418,49 @@ def test_the_manuscript_names_every_class_it_drops_for_want_of_training_data():
             "reason it excludes standing water; this test carries no name "
             "to look for it under")
         assert gloss[cls] in tex, (
-            f"sec. materials excludes {cls} for want of training instances "
-            f"without naming it, so a reader reads it into 'All remaining "
-            "pixels form the background'")
+            f"the paper excludes {cls} for want of training instances "
+            "without naming it, so a reader reads it into the background")
 
 
-def test_methods_names_the_class_each_rotation_reads_its_floor_on():
-    """Manuscript sec. methods fixes one floor for the two cross-validations,
-    and the two do not read it on the same class. The leave-one-site-out one
-    reads it on a control, the farm access road. The paddy-restricted one
-    reads it on the tilled paddy surface, a traversability
-    target and the class its own comparisons are about, so a sentence scoping
-    the floor to a control class describes one cross-validation of the two.
+def test_the_paper_prints_every_floor_class_at_site_a():
+    """Manuscript sec. concentration prints, for the networks trained without
+    site A, their pooled IoU at site A on the farm access road and on the
+    tilled paddy surface, on both cross-validations: 'is 0.248 on the leave-one-site-out fold and 0.056 on the rice-paddy
+    fold' and 'On the tilled surface, averaged in the same way, they score 0.362 at
+    site A on the leave-one-site-out fold and 0.392 on the rice-paddy fold,
+    the lowest of the three rice-paddy folds.' analyze_folds.py reads a floor on
+    one class per cross-validation, and the two classes give opposite readings
+    at site A, so the paper prints both classes on both cross-validations and
+    rests no claim on either reading.
 
-    The classes and the value come from results/folds.md, which is what
-    analyze_folds.py writes when it applies the floor. The paragraph that has to name
-    them is the one sec. methods fixes the floor in, not the manuscript at
-    large: both glosses appear in sec. results already, where they name a
-    reported number rather than a criterion's scope."""
+    The classes come from results/folds.md, which is what analyze_folds.py
+    writes when it applies a floor."""
     with open(os.path.join(RES, "folds.md")) as f:
-        floors = re.findall(r"Floor: `(\w+)` intersection IoU >= ([\d.]+)",
-                            f.read())
-    assert floors, ("results/folds.md records no floor, so sec. methods' "
-                    "floor sentence ranges over nothing")
-    gloss = {"common_road": "farm access road",
-             "paddy_after_driving": "tilled paddy surface"}
-    tex = _read_tex()
-    para = " ".join(next(p for p in tex.split("\n\n")
-                         if r"\floorIoU" in p).split())
-    fixed = float(re.search(r"\\newcommand\{\\floorIoU\}\{([\d.]+)",
-                            _read_params()).group(1))
-    for cls, value in floors:
-        assert float(value) == fixed, (
-            f"sec. methods fixes the floor at {fixed} through floorIoU, "
-            f"but analyze_folds.py applied {value} to {cls}")
-        assert cls in gloss, (
-            f"analyze_folds.py reads the floor on {cls} and this test carries no name "
-            "to look for it under")
-        assert gloss[cls] in para, (
-            f"analyze_folds.py reads the floor on {cls}, and sec. methods does not "
-            "name it where it fixes the floor, so a reader takes the floor "
-            "for a criterion on a control class in both cross-validations")
+        classes = set(re.findall(r"Floor: `(\w+)` intersection IoU", f.read()))
+    want = {"common_road": {"roadLeaveOutSiteA", "roadRiceSiteA"},
+            "paddy_after_driving": {"tilledLeaveOutSiteA", "tilledRiceSiteA"}}
+    assert classes == set(want), (
+        f"analyze_folds.py reads floors on {sorted(classes)}, and this test "
+        f"carries the site-A macros of {sorted(want)}")
+    para = next(p for p in _read_tex().split("\n\n") if r"\roadRiceSiteA" in p)
+    for cls, macros in want.items():
+        for m in macros:
+            assert "\\" + m in para, (
+                f"sec. concentration prints site A's pooled IoU on {cls} for one "
+                f"cross-validation only; \\{m} is missing")
+    b0 = _folds.load_runs("mit_b0")
+    tilled = {f: _fold_mean(b0, p, "paddy_after_driving")
+              for f, p in _folds.G_FOLD_PROTO.items()}
+    assert min(tilled, key=tilled.get) == "site000", (
+        "sec. concentration prints 'at least' the site-A value for every "
+        f"rice-paddy fold, but the lowest is {min(tilled, key=tilled.get)}: "
+        f"{tilled}")
 
 
 def test_every_encoder_starts_from_the_initialization_the_paper_names():
-    """Manuscript sec. discussion: 'Every encoder starts from weights
-    pretrained on the color photographs of ImageNet. The RGB input matches
+    """Manuscript sec. discussion: 'the encoders' initialization may,
+    because every encoder starts from weights pretrained on the color
+    photographs of ImageNet. The RGB input matches
     those photographs in band and in color, the luminance control matches them
     in band alone, and NIR matches them in neither.' The scope
     paragraph rests on that sentence, and it ranges over the models
@@ -3635,15 +3496,14 @@ def test_every_encoder_starts_from_the_initialization_the_paper_names():
 
 
 def test_a_site_level_test_sits_beside_the_criteria_that_pool_a_rotation():
-    """Manuscript sec. methods puts a site-level test, a one-sample t on the
-    fold means, beside a criterion, and gives the reason: 'The interval of a
-    test that pools the folds weights each fold by its frame count, so one site
-    with many frames can alone produce an interval that excludes zero.' Pooling is what the test answers, so pooling is the
-    condition, and more criteria cross the cross-validation than pool it.
+    """Manuscript sec. criteria: 'The site-level test, a one-sample $t$ test on the three held-out ...
+    mean margins of one cross-validation, asks whether a margin holds across
+    those sites.' Every criterion of folds.md that
+    pools a cross-validation's folds carries that test beside it.
 
     Both sets are derived from results/folds.md, and the fold count a
-    between-site spread needs comes from analyze_folds.py rather than from a number
-    restated here."""
+    between-site spread needs comes from analyze_folds.py rather than from a
+    number restated here."""
     with open(os.path.join(RES, "folds.md")) as f:
         blocks = [b for b in re.split(r"\n(?=#)", f.read())
                   if b.startswith("### ")]
@@ -3667,26 +3527,23 @@ def test_a_site_level_test_sits_beside_the_criteria_that_pool_a_rotation():
         "every criterion read across a cross-validation now carries a site-level "
         "test, so sec. methods may state the cross-validation as the condition and "
         "this test no longer distinguishes it from pooling")
-    stated = next(s for s in re.split(r"(?<=\.)\s+",
-                                      _read_tex().replace("\n", " "))
-                  if "site-level test" in s)
-    assert "pool" in stated, (
-        f"sec. methods states the condition as {stated!r}, but "
-        f"results/folds.md reports a site-level test for {sorted(sited)} and "
-        f"none for {sorted(rotation - sited)}, which cross the same cross-validation "
-        "without pooling it")
+    flat = " ".join(_read_tex().split())
+    assert ("The site-level test, a one-sample $t$ test on the three held-out "
+            "sites' mean margins") in flat, (
+        f"results/folds.md reports a site-level test for {sorted(sited)}, and "
+        "sec. criteria no longer defines the test")
 
 
 def test_one_blocked_comparison_favors_the_second_camera_and_the_paper_names_it():
-    """Manuscript sec. redundancy: 'Fusion, however, is better than RGB on the
-    tilled paddy surface.', and that margin changes sign across the held-out
-    sites: 'Fusion's gain over RGB on the tilled paddy surface, found under
-    the site-blocked protocol, does not hold at every held-out site'.
+    """Manuscript sec. redundancy: 'Of the other configurations, fusion is
+    better than RGB on the tilled paddy surface', and that margin changes sign across the held-out sites:
+    'Fusion's margin over RGB on the tilled surface is negative at site A on
+    both cross-validations'.
 
-    The set is every family against every target class under the
-    site-blocked protocol, read with the three conditions, and the comparison
-    the paper names is derived from it, so a second comparison arriving in
-    the second camera's favor fails rather than sits unmentioned."""
+    The set is every family against every target class at site C, read with
+    the three conditions, and the comparison the paper names is derived from
+    it, so a second comparison arriving in the second camera's favor fails
+    rather than sits unmentioned."""
     A = importlib.import_module("analyze")
     runs, px = A.load_runs(), A.gt_px()
     favoring = set()
@@ -3705,7 +3562,7 @@ def test_one_blocked_comparison_favors_the_second_camera_and_the_paper_names_it(
         f"favor under the site-blocked protocol, but the runs give "
         f"{sorted(favoring)}")
     tex = " ".join(_read_tex().split())
-    assert "Fusion, however, is better than RGB on the tilled paddy surface" in tex, (
+    assert "fusion is better than RGB on the tilled paddy surface" in tex, (
         "a comparison favors the second camera under the site-blocked "
         "protocol, and sec. redundancy no longer names it")
     folds = dict(_folds.E_FOLD_PROTO)
@@ -3739,32 +3596,6 @@ def test_fusion_and_rgb_rank_no_other_target_class_under_site_blocking():
         "sec. redundancy ranks fusion and RGB on the tilled paddy surface and "
         "the field furrow only, and calls the other three target classes "
         f"unranked, but the three conditions rank {sorted(ranked)}")
-
-
-def test_the_control_rule_marks_the_leaked_split():
-    """Manuscript sec. concentration: 'Under the same split, NIR's margin over
-    RGB on the in-field trees, a control class, also has an interval excluding
-    zero, so NIR's advantage under that split is not specific to the target
-    classes.' tab:margins
-    prints the margin, +0.337. The lead must be on a class the Methods name as
-    a control, with an interval excluding zero, and the printed values must be
-    the paired statistic's."""
-    assert "common_tree" in config.CONTROLS, (
-        "sec. methods names the in-field trees a control class, but config.py "
-        f"CONTROLS is {config.CONTROLS}")
-    A = importlib.import_module("analyze")
-    s = A.paired_family(A.load_runs(), "official", "NIR", "RGB", "isec",
-                        A.gt_px())["common_tree"]
-    assert s["lo"] > 0, (
-        "sec. concentration reports near-infrared leading RGB on the "
-        "in-field-tree control class under the sequence-level split with an "
-        f"interval excluding zero, but it is [{s['lo']:+.3f},{s['hi']:+.3f}]")
-    params = _read_params()
-    mean = re.search(r"\\newcommand\{\\nirRgbTreeOfficial\}"
-                     r"\{\\ensuremath\{([+-][\d.]+)\}\}", params).group(1)
-    assert math.isclose(float(mean), s["mean"], abs_tol=5e-4), (
-        f"params.tex prints the in-field-tree margin as {mean}, but it is "
-        f"{s['mean']:+.4f}")
 
 
 def test_every_test_a_repo_file_names_exists():
@@ -3894,9 +3725,8 @@ def test_every_manuscript_sentence_a_test_quotes_is_still_in_the_manuscript():
 
 
 def test_every_accuracy_the_paper_prints_carries_its_spread_over_all_seeds():
-    """Manuscript sec. methods: 'Every IoU that we report is a mean over five
-    random seeds, and a ... beside it gives its standard deviation over the
-    seeds.'
+    """Manuscript sec. criteria: 'Every IoU is a mean over five seeds, and a
+    ... beside it gives its standard deviation over the seeds.'
 
     The quantifier is the claim. A win printed without the loser's spread is
     unfalsifiable, so the sentence has to hold over every cell of every table,
@@ -3940,14 +3770,13 @@ def test_every_accuracy_the_paper_prints_carries_its_spread_over_all_seeds():
 
 
 def test_every_site_level_test_the_paper_reports_runs_on_all_three_folds():
-    """Manuscript sec. methods: 'Every site-level test runs on the
-    fold means of all three sites. With two degrees of freedom, its 0.05
-    critical value is 4.30 standard errors' The claim ranges over the site-level p values the
-    paper prints, so both ends are derived: the printed set from the
-    parameter file, and the reproducible set from the fold maps, over every
-    comparison of a cross-validation's folds the analyzers can form. A site-level p
-    that only a two-fold map reproduces fails, because its critical value is
-    not the one the Methods print."""
+    """Manuscript sec. criteria: the site-level test is 'a one-sample $t$ test
+    on the three held-out ... mean margins'. The claim ranges over the
+    site-level p values the paper prints, so both ends are derived: the
+    printed set from the parameter file, and the reproducible set from the
+    fold maps, over every comparison of a cross-validation's folds the
+    analyzers can form. A site-level p that only a two-fold map reproduces
+    fails."""
     printed = set()
     for m in re.finditer(r"\\newcommand\{\\[A-Za-z]+\}\{([^}]*)\}\s*%([^\n]*)",
                          _read_params()):
@@ -3983,3 +3812,286 @@ def test_every_site_level_test_the_paper_reports_runs_on_all_three_folds():
         f"sec. methods states every reported site-level test runs on all "
         f"{n_sites} folds, but these printed values are reproduced by no "
         f"{n_sites}-fold map: {short}")
+
+
+# ------------- the band or the annotation (annotation_diagnosis.py) ---------
+# NIR is the only configuration that trains on the NIR annotation, so sec.
+# split reads how the two annotations mark the paddy edge, scores NIR's lead
+# where they agree and on the RGB annotation, and decomposes the lead with the
+# diagnostic network. Each value is recomputed here from the committed
+# agreement file, the index and the runs' per-frame counts.
+
+def _macro_value(name):
+    m = re.search(r"\\newcommand\{\\" + name + r"\}\{(?:\\ensuremath\{)?([^}\\]+)",
+                  _read_params())
+    assert m, f"params.tex defines no \\{name}"
+    return m.group(1).strip()
+
+
+def _macro_ci(name):
+    m = re.search(r"\\newcommand\{\\" + name
+                  + r"\}\{\\ensuremath\{\[([^,]+),\\,([^\]]+)\]\}\}",
+                  _read_params())
+    assert m, f"params.tex defines no interval \\{name}"
+    return m.group(1), m.group(2)
+
+
+def test_the_two_annotations_mark_the_paddy_edge_alike_overall():
+    """Manuscript sec. split: 'Over all sampled frames, the NIR annotation
+    marks the class in 1.06 times as many frames as the RGB annotation, with
+    0.96 times the area per frame, so the two annotations differ in where they mark the edge rather than in
+    how much of it they mark.' "About" is read as within a tenth of one, for each ratio
+    and for their product, the ratio of the marked areas."""
+    recs = _index()
+    c = config.CLASSES.index("paddy_edge")
+    r = np.array([x["px_rgb"][c] for x in recs])
+    n = np.array([x["px_nir"][c] for x in recs])
+    count = (n > 0).sum() / (r > 0).sum()
+    area = n[n > 0].mean() / r[r > 0].mean()
+    for v in (count, area, count * area):
+        assert abs(v - 1) < 0.1, (
+            "sec. split says the two annotations mark about as much of the "
+            f"paddy edge, but the ratios are {count:.3f}, {area:.3f} and "
+            f"{count * area:.3f}")
+    for macro, v in (("annCountRatio", count), ("annAreaRatio", area)):
+        assert _macro_value(macro) == f"{v:.2f}", (
+            f"sec. split prints \\{macro} as {_macro_value(macro)}, and the "
+            f"committed annotations give {v:.4f}")
+
+
+def test_the_two_annotations_agree_less_on_the_validation_frames():
+    """Manuscript sec. split: 'The IoU between the two annotations, the pixels
+    that both mark divided by the pixels that either marks, is 0.18 on the
+    validation frames, against 0.54 on the training frames'."""
+    D = importlib.import_module("phases.annotation_diagnosis")
+    z = np.load(D.AGREE_NPZ)
+    side = {(x["env"], x["seq"], x["frame"]): x["osplit"] for x in _index()}
+    sides = np.array([side[(str(e), str(q), int(f))]
+                      for e, q, f in zip(z["env"], z["seq"], z["frame"])])
+    c = config.CLASSES.index("paddy_edge")
+    share = {sp: z["inter_raw"][sides == sp, c].sum()
+             / z["union_raw"][sides == sp, c].sum() for sp in ("train", "val")}
+    assert (_macro_value("annAgreeEdgeVal") == f"{share['val']:.2f}"
+            and _macro_value("annAgreeEdgeTrain") == f"{share['train']:.2f}"
+            and share["val"] < share["train"]), (
+        "sec. split prints the paddy edge's shared pixels as "
+        f"{_macro_value('annAgreeEdgeVal')} on the validation frames and "
+        f"{_macro_value('annAgreeEdgeTrain')} on the training frames, and the "
+        f"committed annotations give {share}")
+
+
+def _diag_check(macro, ci_macro, units_d, sign):
+    """A margin of sec. split against its recomputation; sign is +1 for an
+    interval above zero and 0 for one spanning zero."""
+    A = importlib.import_module("analyze")
+    units, d = units_d
+    lo, hi = A.cluster_ci(d, units)
+    assert _macro_value(macro) == f"{d.mean():+.3f}" and _macro_ci(ci_macro) \
+        == (f"{lo:+.3f}", f"{hi:+.3f}"), (
+        f"\\{macro} and \\{ci_macro} print {_macro_value(macro)} "
+        f"{_macro_ci(ci_macro)}, and the runs give {d.mean():+.4f} "
+        f"[{lo:+.4f}, {hi:+.4f}]")
+    assert (lo > 0) if sign > 0 else (lo < 0 < hi), (
+        f"sec. split reads \\{macro}'s interval as "
+        f"{'above zero' if sign > 0 else 'spanning zero'}, but it is "
+        f"[{lo:+.4f}, {hi:+.4f}]")
+
+
+def test_the_lead_holds_where_the_two_annotations_agree():
+    """Manuscript sec. split: 'NIR's lead does not rest on the validation
+    frames whose annotations agree least after the shift. On the half of the
+    paddy-edge validation frames whose two annotations have the highest IoU
+    after the shift, the margin of NIR over RGB and its interval lie above
+    zero' tab:margins prints both halves."""
+    pairs = _diag_pairs()
+    _diag_check("annUpperMargin", "annUpperMarginCI",
+                pairs["annUpperMarginCI"], +1)
+    units, d = pairs["annLowerMarginCI"]
+    lo, hi = importlib.import_module("analyze").cluster_ci(d, units)
+    assert _macro_value("annLowerMargin") == f"{d.mean():+.3f}" and \
+        _macro_ci("annLowerMarginCI") == (f"{lo:+.3f}", f"{hi:+.3f}"), (
+        "tab:margins prints the lower half's margin differently from the runs")
+
+
+def test_the_lead_is_not_detected_on_the_rgb_annotation():
+    """Manuscript sec. split: 'Scored on the RGB annotation alone, which RGB trains on, the comparison
+    of NIR with RGB, however, detects no difference'."""
+    _diag_check("nirRgbEdgeOnRgb", "nirRgbEdgeOnRgbCI",
+                _diag_pairs()["nirRgbEdgeOnRgbCI"], 0)
+
+
+def test_no_configuration_learns_the_paddy_edge_at_a_held_out_site():
+    """Manuscript sec. redundancy: 'On the paddy edge, each input
+    configuration's pooled IoU at site C on the leave-one-site-out
+    cross-validation lies between 0.011 and 0.059'. The range is taken
+    over the four configurations' seed-mean pooled IoUs at site C, the cells
+    of tab:perclass."""
+    runs = _study_runs()
+    v = [_fs_iou(runs, a, "blocked", "isec", "paddy_edge")
+         for a in ("RGB", "LUM", "NIR", "RGBNIR")]
+    assert (_macro_value("edgeSiteCLow") == f"{min(v):.3f}"
+            and _macro_value("edgeSiteCHigh") == f"{max(v):.3f}"), (
+        f"sec. redundancy prints the range {_macro_value('edgeSiteCLow')} to "
+        f"{_macro_value('edgeSiteCHigh')}, and the runs give {v}")
+    # 'On the rice-paddy cross-validation, NIR scores 0.064 at site C and RGB
+    # 0.138, although the per-frame comparison detects no difference between
+    # the two.'
+    proto = _folds.G_FOLD_PROTO["site002"]
+    rice = {a: _fs_iou(runs, a, proto, "isec", "paddy_edge") for a in ("NIR", "RGB")}
+    assert (_macro_value("edgeSiteCRiceNir") == f"{rice['NIR']:.3f}"
+            and _macro_value("edgeSiteCRiceRgb") == f"{rice['RGB']:.3f}"), (
+        f"sec. redundancy prints NIR {_macro_value('edgeSiteCRiceNir')} and RGB "
+        f"{_macro_value('edgeSiteCRiceRgb')} at site C on the rice-paddy "
+        f"cross-validation, and the runs give {rice}")
+    A = importlib.import_module("analyze")
+    px = A.gt_px()
+    allruns = A.load_runs()
+    fam = A.paired_family(allruns, proto, "NIR", "RGB", "isec", px)
+    own = A.paired_family(allruns, proto, "NIR", "RGB", A.own_proto("NIR"), px)
+    p_holm = A.holm({c: (fam[c]["p"] if fam.get(c) else None) for c in TARGETS})
+    v_edge = A.verdict("paddy_edge", fam.get("paddy_edge"),
+                       own.get("paddy_edge"), p_holm.get("paddy_edge"))
+    assert not v_edge.startswith("DIRECTIONAL"), (
+        "sec. redundancy says the per-frame comparison of NIR with RGB on the "
+        "paddy edge at site C on the rice-paddy cross-validation detects no "
+        f"difference, but the three conditions return {v_edge}")
+
+
+def test_the_registration_bound_leaves_the_upper_half_margin_above_zero():
+    """Manuscript sec. split: 'Part of that contrast is the camera offset,
+    which is larger on the validation frames. We shift the NIR annotation by the offset of up to 16 px that best
+    aligns it with the RGB annotation over every class but the background.
+    The shift raises the IoU from 0.18 to 0.28 on the validation frames and
+    from 0.54 to 0.71 on the training frames, but it reaches its bound on 45% of the validation frames that mark
+    the paddy edge, against 12% of such training frames. With a bound of 48
+    px, the IoU is 0.39 and 0.75, although 31% and 5% of those frames still
+    reach that bound.' and 'With bounds of 16 px, 32 px and 48 px, that margin lies
+    between +0.184 and +0.188, its interval above zero at each.' Recomputed
+    from the committed sensitivity file and the runs' per-frame counts, with
+    S1's committed readings (src/phases/annotation_diagnosis.py)."""
+    A = importlib.import_module("analyze")
+    D = importlib.import_module("phases.annotation_diagnosis")
+    recs = _index()
+    zs = np.load(D.SENS_NPZ)
+    z = np.load(D.AGREE_NPZ)
+    assert (np.array_equal(zs["shift_16"], z["shift"])
+            and np.array_equal(zs["inter_edge_16"], z["inter_reg"][:, D.EDGE])
+            and np.array_equal(zs["union_edge_16"], z["union_reg"][:, D.EDGE])), (
+        "the sensitivity file's 16 px registration differs from the committed "
+        "agreement file, so the two bounds are not one search widened")
+    row = {(str(e), str(q), int(f)): i
+           for i, (e, q, f) in enumerate(zip(zs["env"], zs["seq"], zs["frame"]))}
+    side = np.array([x["osplit"] for x in recs])
+    idx = np.array([row[(x["env"], x["seq"], x["frame"])] for x in recs])
+    both = np.array([x["px_rgb"][D.EDGE] > 0 and x["px_nir"][D.EDGE] > 0
+                     for x in recs])
+    px = A.gt_px()
+    runs = [m for m in A.load_runs() if m["protocol"] == "official"]
+
+    def fi(arm):
+        return A.frame_iou_by_arm([m for m in runs if m["arm"] == arm], "isec",
+                                  D.EDGE, A.inc_own("isec"), px)
+
+    nir, rgb = fi("NIR"), fi("RGB")
+    got, uppers = {}, []
+    for b in D.REG_BOUNDS:
+        sat = (np.abs(zs[f"shift_{b}"][idx]) >= b).any(1)
+        inter, union = zs[f"inter_edge_{b}"][idx], zs[f"union_edge_{b}"][idx]
+        got[b] = {n: (float(sat[(side == n) & both].mean()),
+                      float(inter[side == n].sum() / union[side == n].sum()))
+                  for n in ("train", "val")}
+        agree = {k: zs[f"inter_edge_{b}"][row[k]] / zs[f"union_edge_{b}"][row[k]]
+                 for k in nir}
+        med = float(np.median(list(agree.values())))
+        ks = sorted(k for k, a in agree.items() if a >= med and k in rgb)
+        d = np.array([nir[k] - rgb[k] for k in ks])
+        lo, hi = A.cluster_ci(d, A.seq_units(ks))
+        assert lo > 0, (
+            f"sec. split says the upper-half margin's interval lies above zero "
+            f"with a {b} px bound, but it is [{lo:+.4f}, {hi:+.4f}]")
+        uppers.append(float(d.mean()))
+    lo16, wide = got[D.SHIFT_PX], got[max(D.REG_BOUNDS)]
+    assert all(lo16[n][1] > float(_macro_value(f"annAgreeEdge{n.capitalize()}"))
+               for n in ("train", "val")), (
+        "sec. split says the shift raises the IoU of both sets, but the "
+        f"registered values are {lo16}")
+    assert lo16["val"][0] > lo16["train"][0] + D.SAT_TOL, (
+        "sec. split says the camera offset is larger on the validation frames, "
+        f"but the saturation shares are {lo16}")
+    printed = {
+        "regAgreeVal": f"{lo16['val'][1]:.2f}",
+        "regAgreeTrain": f"{lo16['train'][1]:.2f}",
+        "regSatValPct": f"{100 * lo16['val'][0]:.0f}",
+        "regSatTrainPct": f"{100 * lo16['train'][0]:.0f}",
+        "regAgreeValWide": f"{wide['val'][1]:.2f}",
+        "regAgreeTrainWide": f"{wide['train'][1]:.2f}",
+        "regSatValWidePct": f"{100 * wide['val'][0]:.0f}",
+        "regSatTrainWidePct": f"{100 * wide['train'][0]:.0f}",
+        "regUpperLow": f"{min(uppers):+.3f}",
+        "regUpperHigh": f"{max(uppers):+.3f}",
+        "regBoundPx": f"{D.SHIFT_PX}",
+        "regBoundMidPx": f"{sorted(D.REG_BOUNDS)[1]}",
+        "regBoundWidePx": f"{max(D.REG_BOUNDS)}",
+    }
+    wrong = {m: (_macro_value(m), v) for m, v in printed.items()
+             if _macro_value(m) != v}
+    assert not wrong, f"sec. split prints these values, and S1 gives: {wrong}"
+    assert len(D.REG_BOUNDS) == 3 and D.SHIFT_PX == min(D.REG_BOUNDS), (
+        "sec. split names three bounds, the smallest the one D1 and D2 use")
+
+
+def _d5_reading():
+    """The committed reading of D5 (src/phases/annotation_diagnosis.py),
+    recomputed here: 'band', 'annotation' or 'both or neither'."""
+    D = importlib.import_module("phases.annotation_diagnosis")
+    A = importlib.import_module("analyze")
+    runs = _study_runs()
+    pool = {a: _fs_iou(runs, a, "official", "isec", "paddy_edge")
+            for a in ("RGB", "NIR", config.DIAG_ARM)}
+    pairs = _diag_pairs()
+    band = A.cluster_ci(pairs["diagRgbEdgeCI"][1], pairs["diagRgbEdgeCI"][0])
+    ann = A.cluster_ci(pairs["nirDiagEdgeCI"][1], pairs["nirDiagEdgeCI"][0])
+    point = pool["RGB"] + D.HALFWAY * (pool["NIR"] - pool["RGB"])
+    hi_side = pool[config.DIAG_ARM] >= point
+    if band[0] > 0 and hi_side:
+        return "band"
+    if ann[0] > 0 and not hi_side:
+        return "annotation"
+    return "both or neither"
+
+
+def test_the_band_or_the_annotation():
+    """Manuscript sec. split: 'The diagnostic configuration, which receives
+    the NIR image and trains on the RGB annotation, scores ... on the paddy
+    edge'. The reading that the paper states is the one that
+    src/phases/annotation_diagnosis.py D5 commits, recomputed here, and each
+    printed margin of the decomposition is recomputed from the runs."""
+    runs = _study_runs()
+    A = importlib.import_module("analyze")
+    pairs = _diag_pairs()
+    reading = _d5_reading()
+    flat = " ".join(_read_tex().split())
+    stated = {"band": "so the image carries most of NIR's lead",
+              "both or neither": "The comparisons therefore credit neither the "
+                                 "image nor the annotation alone with NIR's "
+                                 "lead"}
+    assert reading in stated and stated[reading] in flat, (
+        f"the committed D5 reading recomputes as '{reading}', and sec. split "
+        "does not state that reading")
+    for macro, arm in (("diagEdgeSplit", config.DIAG_ARM),
+                       ("fusionEdgeSplit", "RGBNIR")):
+        v = [m["iou"]["isec"]["paddy_edge"] for m in runs
+             if m["arm"] == arm and m["protocol"] == "official"]
+        assert len(v) == len(config.SEEDS), (
+            f"{arm} has {len(v)} runs under the dataset's split, not one per seed")
+        want = f"{np.mean(v):.3f} \\pm {np.std(v):.3f}"
+        got = re.search(rf"\\newcommand\{{\\{macro}\}}\{{\\ensuremath\{{([^}}]+)\}}",
+                        _read_params())
+        assert got and got.group(1) == want, (
+            f"\\{macro} prints {got.group(1) if got else 'nothing'}, and the "
+            f"runs give {want}")
+    band_sign = +1 if reading == "band" else 0
+    for macro, key, sign in (("diagRgbEdge", "diagRgbEdgeCI", band_sign),
+                             ("nirDiagEdge", "nirDiagEdgeCI", +1),
+                             ("fusionRgbEdgeSplit", "fusionRgbEdgeSplitCI", +1)):
+        _diag_check(macro, key, pairs[key], sign)

@@ -63,7 +63,7 @@ G_FOLD_PROTO = {f: "ploso" + f[len("site"):] for f in C.PLOSO_RUN_FOLDS}
 
 ARMS = ["RGB", "NIR", "LUM", "RGBNIR"]
 # E1/F1/G2 are about the paddy_edge leakage headline, which is the
-# NIR-concentrated effect (phases A/C, leakage_isolation.py). Every arm is
+# NIR-concentrated effect (phases A/C). Every arm is
 # tabulated so the
 # arm-specificity stays visible; the gate is declared on this one, stated
 # here rather than chosen after seeing the table.
@@ -140,9 +140,7 @@ def paired_protocols(runs, arm, proto_x, proto_y, label_proto, px,
         shared = sorted(set(fx) & set(fy))
         if restrict is not None:
             shared = [k for k in shared if k in restrict]
-        # Only evaluable classes are scored (sec:protocols), as in
-        # analyze.py paired_family.
-        if len(shared) < C.MIN_VAL_FRAMES:
+        if not A.evaluable(len(shared)):
             out[cls] = None
             continue
         d = np.array([fx[k] - fy[k] for k in shared])
@@ -497,8 +495,8 @@ def main():
             "the remaining difference is site blocking.")
         md, _ = leakage_gate(
             md, b0, {f: ("pofficial", p) for f, p in G_FOLD_PROTO.items()}, px,
-            "G2b", "Frame-fixed paired test (leakage_isolation.py's design in the "
-            f"{C.PLOSO_ENV} regime): evaluation frames NEITHER condition "
+            "G2b", "Frame-fixed paired test (seen and unseen networks scored "
+            f"on the same frames, in the {C.PLOSO_ENV} regime): evaluation frames NEITHER condition "
             "trained on, so this is not frame memorization and not a "
             "difficulty difference. Governs if it disagrees with G2a. "
             f"Evaluable on {len(C.PLOSO_G2B_FOLDS)} of "

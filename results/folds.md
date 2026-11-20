@@ -147,7 +147,7 @@ Per-frame paired delta on `paddy_edge` (leaked minus site-blocked), intersection
 
 ### G2b
 
-Frame-fixed paired test (leakage_isolation.py's design in the Paddy regime): evaluation frames NEITHER condition trained on, so this is not frame memorization and not a difficulty difference. Governs if it disagrees with G2a. Evaluable on 2 of 3 folds, committed as such.
+Frame-fixed paired test (seen and unseen networks scored on the same frames, in the Paddy regime): evaluation frames NEITHER condition trained on, so this is not frame memorization and not a difficulty difference. Governs if it disagrees with G2a. Evaluable on 2 of 3 folds, committed as such.
 
 Per-frame paired delta on `paddy_edge` (leaked minus site-blocked), intersection protocol. Gate declared on **NIR**; every arm tabulated so arm-specificity stays visible.
 

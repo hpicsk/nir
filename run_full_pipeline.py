@@ -7,7 +7,8 @@ paper/, and the claim tests re-derive every manuscript number from the same
 files. No stage here opens the imagery.
 
 The stages that do need it - the site-blocked split, the frame index, the
-240 training runs, and the two probes that score models - are upstream, and
+245 training runs, the camera offset, and the measurement of the two
+annotations' agreement - are upstream, and
 the README carries their sequence. Their outputs are committed, so this
 script checks that all of them are present and stops naming what is missing
 rather than regenerating a paper from part of a run.
@@ -25,11 +26,14 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 import config as C  # noqa: E402
 
 # Each stage with the artifact it writes, in dependency order: the geometry
-# probe and the two analyzers, then the three generators that read them.
+# probe, the two analyzers and the range of the frame minima, then the three
+# generators that read them.
 STAGES = [
     ("phases.geometry_probe", "data/processed/geometry_probe.json"),
     ("analyze", "results/summary.md"),
     ("analyze_folds", "results/folds.md"),
+    ("minima_range", "results/minima_range.json"),
+    ("phases.annotation_diagnosis", "results/annotation_diagnosis.json"),
     ("build_parameters", "paper/params.tex"),
     ("build_tables", "paper/table_perclass_iou.tex"),
     ("build_figures", "paper/fig_leakage_isolation.pdf"),
@@ -39,8 +43,9 @@ STAGES = [
 # than counted, so a queue that finished the wrong 240 runs is missing runs.
 UPSTREAM = ["data/processed/index.json",
             "data/processed/splits_blocked.json",
-            "results/leakage_isolation.json",
-            "results/camera_offset.json"]
+            "results/camera_offset.json",
+            "results/annotation_agreement.npz",
+            "results/registration_sensitivity.npz"]
 
 
 def missing():
@@ -58,8 +63,9 @@ def main():
             f"{len(absent)} of the artifacts this chain reads are absent, "
             f"starting with {absent[0]}. Each comes from a stage that opens "
             "the imagery, which this repository does not redistribute. Build "
-            "the split and the index, run the training queue, then the two "
-            "probes; the README carries the sequence.")
+            "the split and the index, run the training queue, then the "
+            "camera offset and the annotation agreement; the README carries "
+            "the sequence.")
     for module, writes in STAGES:
         print(f"== {module} -> {writes}", flush=True)
         runpy.run_module(module, run_name="__main__")
